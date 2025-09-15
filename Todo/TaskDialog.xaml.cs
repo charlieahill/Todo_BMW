@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Collections.ObjectModel;
+using System.Windows.Input;
 
 namespace Todo
 {
@@ -8,31 +10,96 @@ namespace Todo
     {
         public string TaskTitle { get; set; }
         public string TaskDescription { get; set; }
-        public List<string> TaskPeople { get; set; } = new List<string>();
-        public List<string> TaskMeetings { get; set; } = new List<string>();
-        public List<string> PeopleSuggestions { get; set; } = new List<string>();
-        public List<string> MeetingSuggestions { get; set; } = new List<string>();
+        public ObservableCollection<string> TaskPeople { get; set; } = new ObservableCollection<string>();
+        public ObservableCollection<string> TaskMeetings { get; set; } = new ObservableCollection<string>();
+        public ObservableCollection<string> PeopleSuggestions { get; set; } = new ObservableCollection<string>();
+        public ObservableCollection<string> MeetingSuggestions { get; set; } = new ObservableCollection<string>();
 
         public TaskDialog(TaskModel model, IEnumerable<string> peopleSuggestions, IEnumerable<string> meetingSuggestions)
         {
             InitializeComponent();
             TaskTitle = model.TaskName;
             TaskDescription = model.Description;
-            TaskPeople = new List<string>(model.People);
-            TaskMeetings = new List<string>(model.Meetings);
-            PeopleSuggestions = peopleSuggestions.ToList();
-            MeetingSuggestions = meetingSuggestions.ToList();
+            TaskPeople = new ObservableCollection<string>(model.People ?? new List<string>());
+            TaskMeetings = new ObservableCollection<string>(model.Meetings ?? new List<string>());
+            PeopleSuggestions = new ObservableCollection<string>(peopleSuggestions ?? Enumerable.Empty<string>());
+            MeetingSuggestions = new ObservableCollection<string>(meetingSuggestions ?? Enumerable.Empty<string>());
             TitleBox.Text = TaskTitle;
             DescriptionBox.Text = TaskDescription;
             PeopleList.ItemsSource = TaskPeople;
             MeetingsList.ItemsSource = TaskMeetings;
+            PeopleBox.ItemsSource = PeopleSuggestions;
+            MeetingsBox.ItemsSource = MeetingSuggestions;
             DataContext = this;
+
+            // wire up handlers
+            PeopleBox.KeyDown += PeopleBox_KeyDown;
+            MeetingsBox.KeyDown += MeetingsBox_KeyDown;
+            PeopleList.MouseDoubleClick += PeopleList_MouseDoubleClick;
+            MeetingsList.MouseDoubleClick += MeetingsList_MouseDoubleClick;
+        }
+
+        private void PeopleBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                AddPersonFromInput();
+                e.Handled = true;
+            }
+        }
+
+        private void MeetingsBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                AddMeetingFromInput();
+                e.Handled = true;
+            }
+        }
+
+        private void PeopleList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (PeopleList.SelectedItem is string s)
+            {
+                TaskPeople.Remove(s);
+            }
+        }
+
+        private void MeetingsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (MeetingsList.SelectedItem is string s)
+            {
+                TaskMeetings.Remove(s);
+            }
+        }
+
+        private void AddPersonFromInput()
+        {
+            var text = (PeopleBox.Text ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(text) && !TaskPeople.Contains(text))
+            {
+                TaskPeople.Add(text);
+                if (!PeopleSuggestions.Contains(text)) PeopleSuggestions.Add(text);
+            }
+            PeopleBox.Text = string.Empty;
+        }
+
+        private void AddMeetingFromInput()
+        {
+            var text = (MeetingsBox.Text ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(text) && !TaskMeetings.Contains(text))
+            {
+                TaskMeetings.Add(text);
+                if (!MeetingSuggestions.Contains(text)) MeetingSuggestions.Add(text);
+            }
+            MeetingsBox.Text = string.Empty;
         }
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
         {
             TaskTitle = TitleBox.Text;
             TaskDescription = DescriptionBox.Text;
+            // TaskPeople and TaskMeetings are observable collections; convert if callers expect List<string>
             DialogResult = true;
             Close();
         }
@@ -41,6 +108,16 @@ namespace Todo
         {
             DialogResult = false;
             Close();
+        }
+
+        private void AddPersonButton_Click(object sender, RoutedEventArgs e)
+        {
+            AddPersonFromInput();
+        }
+
+        private void AddMeetingButton_Click(object sender, RoutedEventArgs e)
+        {
+            AddMeetingFromInput();
         }
     }
 }

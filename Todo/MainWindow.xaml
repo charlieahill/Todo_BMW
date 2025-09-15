@@ -15,6 +15,7 @@
             <Setter Property="Padding" Value="0"/>
         </Style>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <local:CountToVisibilityConverter x:Key="CountToVis"/>
         <!-- Custom style for ... button -->
         <Style x:Key="TaskOptionsButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
@@ -179,7 +180,7 @@
                             </TextBox>
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
                                 <!-- Description Icon -->
-                                <Viewbox Width="18" Height="18" Visibility="{Binding Description, Converter={StaticResource BoolToVis}, ConverterParameter=desc}">
+                                <Viewbox Width="18" Height="18" Visibility="{Binding Description, Converter={StaticResource CountToVis}, ConverterParameter=desc}">
                                     <Canvas Width="24" Height="24">
                                         <!-- Speech bubble with writing -->
                                         <Path Stroke="Gray" StrokeThickness="1.5" Fill="Transparent" Data="M3,6 Q3,3 6,3 L18,3 Q21,3 21,6 L21,15 Q21,18 18,18 L8,18 L3,21 Z"/>
@@ -188,14 +189,14 @@
                                     </Canvas>
                                 </Viewbox>
                                 <!-- People Icon: single or group -->
-                                <Viewbox Width="18" Height="18" Visibility="{Binding People.Count, Converter={StaticResource BoolToVis}, ConverterParameter=people}">
+                                <Viewbox Width="18" Height="18" Visibility="{Binding People.Count, Converter={StaticResource CountToVis}, ConverterParameter=people}">
                                     <Canvas Width="24" Height="24">
                                         <!-- Single person silhouette -->
                                         <Ellipse Width="8" Height="8" Canvas.Left="8" Canvas.Top="4" Stroke="SlateGray" StrokeThickness="1.5"/>
                                         <Path Stroke="SlateGray" StrokeThickness="1.5" Fill="Transparent" Data="M6,18 Q12,14 18,18"/>
                                     </Canvas>
                                 </Viewbox>
-                                <Viewbox Width="18" Height="18" Visibility="{Binding People.Count, Converter={StaticResource BoolToVis}, ConverterParameter=group}">
+                                <Viewbox Width="18" Height="18" Visibility="{Binding People.Count, Converter={StaticResource CountToVis}, ConverterParameter=group}">
                                     <Canvas Width="24" Height="24">
                                         <!-- Group of three silhouettes -->
                                         <Ellipse Width="5" Height="5" Canvas.Left="3" Canvas.Top="8" Stroke="SlateGray" StrokeThickness="1"/>
@@ -205,7 +206,7 @@
                                     </Canvas>
                                 </Viewbox>
                                 <!-- Meeting Icon -->
-                                <Viewbox Width="18" Height="18" Visibility="{Binding Meetings.Count, Converter={StaticResource BoolToVis}, ConverterParameter=meet}">
+                                <Viewbox Width="18" Height="18" Visibility="{Binding Meetings.Count, Converter={StaticResource CountToVis}, ConverterParameter=meet}">
                                     <Canvas Width="24" Height="24">
                                         <!-- Calendar/clock/meeting icon -->
                                         <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="6" Stroke="DarkSlateGray" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>

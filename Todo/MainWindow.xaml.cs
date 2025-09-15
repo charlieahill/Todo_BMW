@@ -34,11 +34,15 @@ namespace Todo
 
         private DateTime _currentDate = DateTime.Today;
 
+        private bool _isInitializing = false;
+
         public MainWindow()
         {
             InitializeComponent();
 
             DataContext = this;
+
+            _isInitializing = true;
 
             LoadTasks();
 
@@ -47,12 +51,34 @@ namespace Todo
             lbTasksList.ItemsSource = TaskList;
 
             Application.Current.Exit += Current_Exit;
+
+            _isInitializing = false;
         }
 
         private void Current_Exit(object sender, ExitEventArgs e)
         {
+            // Force all TaskTextBox controls to lose focus and update their bindings
+            CommitAllTaskEdits();
             SaveCurrentDateTasks();
             SaveTasks();
+        }
+
+        private void CommitAllTaskEdits()
+        {
+            // Find all ListViewItems in lbTasksList
+            foreach (var item in lbTasksList.Items)
+            {
+                var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(item) as ListViewItem;
+                if (listViewItem != null)
+                {
+                    var textBox = FindVisualChild<TextBox>(listViewItem);
+                    if (textBox != null && textBox.IsFocused)
+                    {
+                        // Move focus away to commit binding
+                        textBox.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+                    }
+                }
+            }
         }
 
         private void LoadTasks()
@@ -65,18 +91,47 @@ namespace Todo
                     var items = JsonSerializer.Deserialize<Dictionary<string, List<TaskModel>>>(json);
                     if (items != null)
                     {
+                        LogLoadedTasks(items); // Log loaded tasks for debugging
+                        // Remove placeholders from loaded data
+                        foreach (var key in items.Keys.ToList())
+                        {
+                            items[key] = items[key].Where(t => t != null && !t.IsPlaceholder).ToList();
+                        }
                         AllTasks = items;
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore load errors
+                MessageBox.Show($"Failed to load tasks: {ex.Message}", "Error");
             }
+        }
+
+        private void LogLoadedTasks(Dictionary<string, List<TaskModel>> items)
+        {
+            try
+            {
+                var logPath = "tasks_debug_log.txt";
+                var sb = new StringBuilder();
+                sb.AppendLine($"[{DateTime.Now}] Loaded AllTasks:");
+                foreach (var kv in items)
+                {
+                    sb.AppendLine($"Date: {kv.Key}");
+                    foreach (var t in kv.Value)
+                    {
+                        sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
+                    }
+                }
+                File.AppendAllText(logPath, sb.ToString());
+            }
+            catch { }
         }
 
         private void SaveTasks()
         {
+            if (_isInitializing) return; // don't save during startup
+
+            LogAllTasks(); // Debug log before saving
             try
             {
                 SaveCurrentDateTasks(); // Ensure current day's tasks are saved before serializing
@@ -84,23 +139,42 @@ namespace Todo
                 var sanitized = new Dictionary<string, List<TaskModel>>();
                 foreach (var kv in AllTasks)
                 {
-                    sanitized[kv.Key] = kv.Value.Where(t => !t.IsPlaceholder).ToList();
+                    sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
                 }
 
                 var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SaveFileName, json);
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore save errors
+                MessageBox.Show($"Failed to save tasks: {ex.Message}", "Error");
             }
+        }
+
+        private void LogAllTasks()
+        {
+            try
+            {
+                var logPath = "tasks_debug_log.txt";
+                var sb = new StringBuilder();
+                sb.AppendLine($"[{DateTime.Now}] Saving AllTasks:");
+                foreach (var kv in AllTasks)
+                {
+                    sb.AppendLine($"Date: {kv.Key}");
+                    foreach (var t in kv.Value)
+                    {
+                        sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
+                    }
+                }
+                File.AppendAllText(logPath, sb.ToString());
+            }
+            catch { }
         }
 
         private string DateKey(DateTime dt) => dt.ToString("yyyy-MM-dd");
 
         private void SetCurrentDate(DateTime dt)
         {
-            SaveCurrentDateTasks();
             _currentDate = dt.Date;
             CurrentDayButton.Content = FormatDate(_currentDate);
             LoadTasksForDate(_currentDate);
@@ -109,6 +183,7 @@ namespace Todo
             {
                 task.IsReadOnly = !isToday;
             }
+            // SaveCurrentDateTasks(); // Removed to prevent wiping out tasks on startup
         }
 
         private void LoadTasksForDate(DateTime dt)
@@ -221,6 +296,38 @@ namespace Todo
             _placeholderJustFocused = false;
         }
 
+        private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (_currentDate != DateTime.Today)
+            {
+                e.Handled = true;
+                return;
+            }
+            // Save after key up for today
+            SaveCurrentDateTasks();
+            SaveTasks();
+        }
+
+        private void TaskTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (_currentDate != DateTime.Today)
+                return;
+            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
+            {
+                if (string.IsNullOrWhiteSpace(tm.TaskName))
+                {
+                    if (!tm.IsPlaceholder)
+                    {
+                        tm.TaskName = string.Empty;
+                        tm.IsPlaceholder = true;
+                    }
+                }
+            }
+            // Save after lost focus for today
+            SaveCurrentDateTasks();
+            SaveTasks();
+        }
+
         // Prevent checking/unchecking for non-today
         private void CheckBox_Click(object sender, RoutedEventArgs e)
         {
@@ -257,34 +364,6 @@ namespace Todo
             int day = dt.Day;
             string suffix = GetOrdinalSuffix(day);
             return $"{dt:dddd}, {day}{suffix} {dt:MMMM}, {dt:yyyy}";
-        }
-
-        // In TaskTextBox_KeyUp, prevent key for non-today
-        private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
-        {
-            if (_currentDate != DateTime.Today)
-            {
-                e.Handled = true;
-                return;
-            }
-        }
-
-        // In TaskTextBox_LostFocus, do nothing for non-today
-        private void TaskTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            if (_currentDate != DateTime.Today)
-                return;
-            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
-            {
-                if (string.IsNullOrWhiteSpace(tm.TaskName))
-                {
-                    if (!tm.IsPlaceholder)
-                    {
-                        tm.TaskName = string.Empty;
-                        tm.IsPlaceholder = true;
-                    }
-                }
-            }
         }
 
         // Navigation handlers
@@ -338,9 +417,19 @@ namespace Todo
         {
             if (_currentDate == null) return;
             var key = DateKey(_currentDate);
-            AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
+            var realTasks = TaskList.Where(t => !t.IsPlaceholder)
                 .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings)))
                 .ToList();
+
+            if (realTasks.Count > 0)
+            {
+                AllTasks[key] = realTasks;
+            }
+            else
+            {
+                if (AllTasks.ContainsKey(key))
+                    AllTasks.Remove(key);
+            }
         }
 
         private void TaskOptionsButton_Click(object sender, RoutedEventArgs e)
