@@ -46,6 +46,54 @@ namespace Todo
             }
         }
 
+        private bool _isReadOnly = false;
+        public bool IsReadOnly
+        {
+            get => _isReadOnly;
+            set
+            {
+                if (_isReadOnly == value) return;
+                _isReadOnly = value;
+                OnPropertyChanged(nameof(IsReadOnly));
+            }
+        }
+
+        private string _description = string.Empty;
+        public string Description
+        {
+            get => _description;
+            set
+            {
+                if (_description == value) return;
+                _description = value;
+                OnPropertyChanged(nameof(Description));
+            }
+        }
+
+        private List<string> _people = new List<string>();
+        public List<string> People
+        {
+            get => _people;
+            set
+            {
+                if (_people == value) return;
+                _people = value;
+                OnPropertyChanged(nameof(People));
+            }
+        }
+
+        private List<string> _meetings = new List<string>();
+        public List<string> Meetings
+        {
+            get => _meetings;
+            set
+            {
+                if (_meetings == value) return;
+                _meetings = value;
+                OnPropertyChanged(nameof(Meetings));
+            }
+        }
+
         public override string ToString()
         {
             string completeAsString = "Complete";
@@ -61,11 +109,14 @@ namespace Todo
 
         }
 
-        public TaskModel(string taskname, bool iscomplete = false, bool isPlaceholder = false)
+        public TaskModel(string taskname, bool iscomplete = false, bool isPlaceholder = false, string description = "", List<string> people = null, List<string> meetings = null)
         {
             TaskName = taskname;
             IsComplete = iscomplete;
             IsPlaceholder = isPlaceholder;
+            Description = description ?? string.Empty;
+            People = people ?? new List<string>();
+            Meetings = meetings ?? new List<string>();
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

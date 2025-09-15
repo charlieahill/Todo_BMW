@@ -7,6 +7,48 @@
         mc:Ignorable="d"
         Title="Todo | Today 27th August 2025" Height="600" Width="800"
         Background="White">
+    <Window.Resources>
+        <!-- Minimal Calendar Style -->
+        <Style x:Key="MinimalCalendarStyle" TargetType="Calendar">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <!-- Custom style for ... button -->
+        <Style x:Key="TaskOptionsButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="Gray"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="ToolTip" Value="Edit task"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#e6f0fa"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#3399ff"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="border" Property="BorderBrush" Value="#3399ff"/>
+                                <Setter TargetName="border" Property="Background" Value="#e6f0fa"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="auto"/>
@@ -21,20 +63,33 @@
             </Grid.ColumnDefinitions>
 
             <!--DATE-->
-            <Grid>
+            <Grid Margin="0,0,0,0" VerticalAlignment="Top" HorizontalAlignment="Left">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="auto"/>
-                    <ColumnDefinition Width="auto"/>
-                    <ColumnDefinition Width="auto"/>
-                    <ColumnDefinition Width="auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="auto"/>
+                    <ColumnDefinition Width="40"/>
+                    <ColumnDefinition Width="260"/>
+                    <ColumnDefinition Width="40"/>
+                    <ColumnDefinition Width="40"/>
                 </Grid.ColumnDefinitions>
+                <Button Grid.Column="0" Name="PreviousDayButton" Click="PreviousDayButton_Click" Width="32" Height="32" FontWeight="Normal">&lt;</Button>
+                <Button Grid.Column="1" Name="CurrentDayButton" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0" IsHitTestVisible="False" Background="Transparent" BorderBrush="Transparent" FontWeight="Normal" Content="Wednesday, 27th August, 2025"/>
+                <Button Grid.Column="2" Name="CalendarButton" Click="CalendarButton_Click" Width="32" Height="32" Background="Transparent" BorderBrush="Transparent" ToolTip="Open calendar" FontWeight="Normal">
+                    <Viewbox Width="24" Height="24">
+                        <Canvas Width="24" Height="24">
+                            <!-- Clean, contemporary calendar icon: outline only, no fill -->
+                            <Rectangle Width="18" Height="14" Stroke="Black" StrokeThickness="1.5" RadiusX="2" RadiusY="2" Canvas.Left="3" Canvas.Top="5" Fill="Transparent"/>
+                            <Line X1="3" Y1="9" X2="21" Y2="9" Stroke="Black" StrokeThickness="1.2"/>
+                            <Line X1="7" Y1="5" X2="7" Y2="3" Stroke="Black" StrokeThickness="1.5"/>
+                            <Line X1="17" Y1="5" X2="17" Y2="3" Stroke="Black" StrokeThickness="1.5"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+                <Button Grid.Column="3" Name="NextDayButton" Click="NextDayButton_Click" Width="32" Height="32" FontWeight="Normal">&gt;</Button>
 
-                <Button Grid.Column="0" Name="PreviousDayButton">&lt;</Button>
-                <Button Grid.Column="1" Name="CurrentDayButton">Wednesday, 27th August, 2025</Button>
-                <Button Grid.Column="2" Name="CalendarButton">cal</Button>
-                <Button Grid.Column="3" Name="NextDayButton">&gt;</Button>
+                <Popup x:Name="CalendarPopup" PlacementTarget="{Binding ElementName=CalendarButton}" Placement="Bottom" StaysOpen="False">
+                    <Border Background="White">
+                        <Calendar x:Name="CalendarControl" SelectedDatesChanged="CalendarControl_SelectedDatesChanged"/>
+                    </Border>
+                </Popup>
             </Grid>
 
             <!--SEARCH-->
@@ -57,7 +112,6 @@
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                    <EventSetter Event="PreviewMouseDoubleClick" Handler="ListViewItem_PreviewMouseDoubleClick"/>
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
@@ -67,8 +121,10 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="auto"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="auto"/>
+                                <ColumnDefinition Width="32"/>
                             </Grid.ColumnDefinitions>
-                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsComplete}"/>
+                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsComplete}" Click="CheckBox_Click"/>
                             <TextBox x:Name="TaskTextBox"
                                      Grid.Column="1"
                                      Text="{Binding TaskName, UpdateSourceTrigger=PropertyChanged}"
@@ -97,6 +153,10 @@
                                             <DataTrigger Binding="{Binding IsComplete}" Value="False">
                                                 <Setter Property="TextDecorations" Value="None"/>
                                             </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsReadOnly}" Value="True">
+                                                <Setter Property="IsReadOnly" Value="True"/>
+                                                <Setter Property="Background" Value="#FFF8F8F8"/>
+                                            </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </TextBox.Style>
@@ -117,6 +177,46 @@
                                     </ControlTemplate>
                                 </TextBox.Template>
                             </TextBox>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                <!-- Description Icon -->
+                                <Viewbox Width="18" Height="18" Visibility="{Binding Description, Converter={StaticResource BoolToVis}, ConverterParameter=desc}">
+                                    <Canvas Width="24" Height="24">
+                                        <!-- Speech bubble with writing -->
+                                        <Path Stroke="Gray" StrokeThickness="1.5" Fill="Transparent" Data="M3,6 Q3,3 6,3 L18,3 Q21,3 21,6 L21,15 Q21,18 18,18 L8,18 L3,21 Z"/>
+                                        <Line X1="7" Y1="8" X2="17" Y2="8" Stroke="Gray" StrokeThickness="1"/>
+                                        <Line X1="7" Y1="12" X2="15" Y2="12" Stroke="Gray" StrokeThickness="1"/>
+                                    </Canvas>
+                                </Viewbox>
+                                <!-- People Icon: single or group -->
+                                <Viewbox Width="18" Height="18" Visibility="{Binding People.Count, Converter={StaticResource BoolToVis}, ConverterParameter=people}">
+                                    <Canvas Width="24" Height="24">
+                                        <!-- Single person silhouette -->
+                                        <Ellipse Width="8" Height="8" Canvas.Left="8" Canvas.Top="4" Stroke="SlateGray" StrokeThickness="1.5"/>
+                                        <Path Stroke="SlateGray" StrokeThickness="1.5" Fill="Transparent" Data="M6,18 Q12,14 18,18"/>
+                                    </Canvas>
+                                </Viewbox>
+                                <Viewbox Width="18" Height="18" Visibility="{Binding People.Count, Converter={StaticResource BoolToVis}, ConverterParameter=group}">
+                                    <Canvas Width="24" Height="24">
+                                        <!-- Group of three silhouettes -->
+                                        <Ellipse Width="5" Height="5" Canvas.Left="3" Canvas.Top="8" Stroke="SlateGray" StrokeThickness="1"/>
+                                        <Ellipse Width="5" Height="5" Canvas.Left="16" Canvas.Top="8" Stroke="SlateGray" StrokeThickness="1"/>
+                                        <Ellipse Width="7" Height="7" Canvas.Left="8.5" Canvas.Top="4" Stroke="SlateGray" StrokeThickness="1.5"/>
+                                        <Path Stroke="SlateGray" StrokeThickness="1.2" Fill="Transparent" Data="M2,21 Q12,16 22,21"/>
+                                    </Canvas>
+                                </Viewbox>
+                                <!-- Meeting Icon -->
+                                <Viewbox Width="18" Height="18" Visibility="{Binding Meetings.Count, Converter={StaticResource BoolToVis}, ConverterParameter=meet}">
+                                    <Canvas Width="24" Height="24">
+                                        <!-- Calendar/clock/meeting icon -->
+                                        <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="6" Stroke="DarkSlateGray" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
+                                        <Ellipse Width="6" Height="6" Canvas.Left="9" Canvas.Top="10" Stroke="DarkSlateGray" StrokeThickness="1"/>
+                                        <Line X1="12" Y1="13" X2="12" Y2="11" Stroke="DarkSlateGray" StrokeThickness="1"/>
+                                        <Line X1="12" Y1="13" X2="14" Y2="13" Stroke="DarkSlateGray" StrokeThickness="1"/>
+                                    </Canvas>
+                                </Viewbox>
+                            </StackPanel>
+                            <!-- ... Button -->
+                            <Button Grid.Column="3" Content="..." Click="TaskOptionsButton_Click" Style="{StaticResource TaskOptionsButtonStyle}" Margin="0,0,2,0"/>
                         </Grid>
                     </Border>
                 </DataTemplate>
