@@ -1,0 +1,126 @@
+﻿<Window x:Class="Todo.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Todo"
+        mc:Ignorable="d"
+        Title="Todo | Today 27th August 2025" Height="600" Width="800"
+        Background="White">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- DATE / SEARCH -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!--DATE-->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="auto"/>
+                    <ColumnDefinition Width="auto"/>
+                    <ColumnDefinition Width="auto"/>
+                    <ColumnDefinition Width="auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0" Name="PreviousDayButton">&lt;</Button>
+                <Button Grid.Column="1" Name="CurrentDayButton">Wednesday, 27th August, 2025</Button>
+                <Button Grid.Column="2" Name="CalendarButton">cal</Button>
+                <Button Grid.Column="3" Name="NextDayButton">&gt;</Button>
+            </Grid>
+
+            <!--SEARCH-->
+            <Grid Grid.Column="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="25"/>
+                    <ColumnDefinition Width="25"/>
+                    <ColumnDefinition Width="25"/>
+                    <ColumnDefinition Width="25"/>
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0" Name="SearchButton">S</Button>
+                <Button Grid.Column="1" Name="PeoplehButton">P</Button>
+                <Button Grid.Column="2" Name="MeetingButton">M</Button>
+                <Button Grid.Column="3" Name="AllButton">A</Button>
+            </Grid>
+        </Grid>
+
+        <ListView Grid.Row="1" Margin="20" Name="lbTasksList" Background="White">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <EventSetter Event="PreviewMouseDoubleClick" Handler="ListViewItem_PreviewMouseDoubleClick"/>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="White" Padding="2,2,2,2" Margin="0,0,0,2">
+                        <Grid VerticalAlignment="Center">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsComplete}"/>
+                            <TextBox x:Name="TaskTextBox"
+                                     Grid.Column="1"
+                                     Text="{Binding TaskName, UpdateSourceTrigger=PropertyChanged}"
+                                     Foreground="Black"
+                                     Background="Transparent"
+                                     BorderBrush="Transparent"
+                                     VerticalAlignment="Center"
+                                     FontSize="18"
+                                     FontFamily="Segoe UI, Calibri, Arial"
+                                     Padding="0"
+                                     KeyUp="TaskTextBox_KeyUp"
+                                     TextChanged="TaskTextBox_TextChanged"
+                                     GotFocus="TaskTextBox_GotFocus"
+                                     LostFocus="TaskTextBox_LostFocus"
+                                     PreviewTextInput="TaskTextBox_PreviewTextInput">
+                                <TextBox.Style>
+                                    <Style TargetType="TextBox">
+                                        <Setter Property="Foreground" Value="Black"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                                <Setter Property="Foreground" Value="Gray"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsComplete}" Value="True">
+                                                <Setter Property="TextDecorations" Value="Strikethrough"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsComplete}" Value="False">
+                                                <Setter Property="TextDecorations" Value="None"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBox.Style>
+                                <TextBox.Template>
+                                    <ControlTemplate TargetType="TextBox">
+                                        <Grid>
+                                            <ScrollViewer x:Name="PART_ContentHost"/>
+                                            <TextBlock Text="Type new task here..."
+                                                       Foreground="Gray"
+                                                       FontStyle="Italic"
+                                                       FontSize="18"
+                                                       FontFamily="Segoe UI, Calibri, Arial"
+                                                       IsHitTestVisible="False"
+                                                       Margin="6,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{Binding IsPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        </Grid>
+                                    </ControlTemplate>
+                                </TextBox.Template>
+                            </TextBox>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Window>
