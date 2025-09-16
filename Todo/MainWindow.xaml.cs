@@ -258,7 +258,29 @@ namespace Todo
                 task.IsReadOnly = !isToday;
             }
             UpdateTitle();
+            UpdateJumpTodayIcon();
             // SaveCurrentDateTasks(); // Removed to prevent wiping out tasks on startup
+        }
+
+        private void UpdateJumpTodayIcon()
+        {
+            try
+            {
+                if (JumpTodayDot != null && JumpTodayCheck != null)
+                {
+                    if (_currentDate == DateTime.Today)
+                    {
+                        JumpTodayDot.Visibility = Visibility.Collapsed;
+                        JumpTodayCheck.Visibility = Visibility.Visible;
+                    }
+                    else
+                    {
+                        JumpTodayDot.Visibility = Visibility.Visible;
+                        JumpTodayCheck.Visibility = Visibility.Collapsed;
+                    }
+                }
+            }
+            catch { }
         }
 
         private void LoadTasksForDate(DateTime dt)
@@ -878,17 +900,35 @@ namespace Todo
         private void ApplyAllFilter(string term)
         {
             TaskList.Clear();
-            var tasks = AllTasks.Values.SelectMany(list => list).ToList();
+
+            // Build a sequence of tasks annotated with their source date key
+            var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key })).ToList();
+
             if (!string.IsNullOrEmpty(term))
             {
                 term = term.ToLowerInvariant();
-                tasks = tasks.Where(t => (!string.IsNullOrEmpty(t.TaskName) && t.TaskName.ToLowerInvariant().Contains(term)) || (!string.IsNullOrEmpty(t.Description) && t.Description.ToLowerInvariant().Contains(term))).ToList();
+                entries = entries.Where(e => (!string.IsNullOrEmpty(e.Task.TaskName) && e.Task.TaskName.ToLowerInvariant().Contains(term)) || (!string.IsNullOrEmpty(e.Task.Description) && e.Task.Description.ToLowerInvariant().Contains(term))).ToList();
             }
 
-            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
-            foreach (var t in unique)
+            // Deduplicate by Id, keeping the first occurrence
+            var unique = entries.GroupBy(e => e.Task.Id).Select(g => g.First()).ToList();
+            foreach (var e in unique)
             {
-                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+                var t = e.Task;
+                var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id);
+                // Set the date this task was stored under
+                if (DateTime.TryParseExact(e.DateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                {
+                    model.SetDate = dt.Date;
+                }
+                else
+                {
+                    model.SetDate = null;
+                }
+                // In All mode we want to show the date under each item
+                model.ShowDate = true;
+
+                TaskList.Add(model);
             }
         }
     }

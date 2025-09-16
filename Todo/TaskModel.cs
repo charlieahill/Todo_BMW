@@ -130,6 +130,32 @@ namespace Todo
             }
         }
 
+        // New: the date/key this task is associated with (yyyy-MM-dd)
+        private DateTime? _setDate = null;
+        public DateTime? SetDate
+        {
+            get => _setDate;
+            set
+            {
+                if (_setDate == value) return;
+                _setDate = value;
+                OnPropertyChanged(nameof(SetDate));
+            }
+        }
+
+        // New: whether the UI should show the date for this task (used in All view)
+        private bool _showDate = false;
+        public bool ShowDate
+        {
+            get => _showDate;
+            set
+            {
+                if (_showDate == value) return;
+                _showDate = value;
+                OnPropertyChanged(nameof(ShowDate));
+            }
+        }
+
         public override string ToString()
         {
             string completeAsString = "Complete";
