@@ -70,13 +70,15 @@
                     <ColumnDefinition Width="260"/>
                     <ColumnDefinition Width="40"/>
                     <ColumnDefinition Width="40"/>
+                    <ColumnDefinition Width="40"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Date controls container -->
-                <Grid x:Name="DateControlsGrid" Grid.Column="0" Grid.ColumnSpan="4">
+                <Grid x:Name="DateControlsGrid" Grid.Column="0" Grid.ColumnSpan="5">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="40"/>
                         <ColumnDefinition Width="260"/>
+                        <ColumnDefinition Width="40"/>
                         <ColumnDefinition Width="40"/>
                         <ColumnDefinition Width="40"/>
                     </Grid.ColumnDefinitions>
@@ -93,7 +95,16 @@
                             </Canvas>
                         </Viewbox>
                     </Button>
-                    <Button Grid.Column="3" Name="NextDayButton" Click="NextDayButton_Click" Width="32" Height="32" FontWeight="Normal">&gt;</Button>
+                    <!-- Jump to Today button placed next to the calendar dropdown -->
+                    <Button Grid.Column="3" Name="JumpToTodayButton" Click="JumpToTodayButton_Click" Width="32" Height="32" Background="Transparent" BorderBrush="Transparent" ToolTip="Jump to today" FontWeight="Normal">
+                        <Viewbox Width="20" Height="20">
+                            <Canvas Width="24" Height="24">
+                                <!-- Small filled circle to indicate today -->
+                                <Ellipse Width="10" Height="10" Canvas.Left="7" Canvas.Top="6" Stroke="Black" StrokeThickness="1" Fill="Black"/>
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button Grid.Column="4" Name="NextDayButton" Click="NextDayButton_Click" Width="32" Height="32" FontWeight="Normal">&gt;</Button>
                 </Grid>
 
                 <!-- People filter combobox shown when in People mode -->
@@ -142,21 +153,34 @@
                     <ColumnDefinition Width="25"/>
                     <ColumnDefinition Width="25"/>
                     <ColumnDefinition Width="25"/>
+                    <ColumnDefinition Width="25"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Today button -->
+                <!-- Today button (redesigned for clarity) -->
                 <Button Grid.Column="0" Name="TodayButton" Click="TodayButton_Click" ToolTip="Today">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
-                            <!-- Simple circle/day icon -->
-                            <Ellipse Width="14" Height="14" Canvas.Left="5" Canvas.Top="3" Stroke="Black" StrokeThickness="1.2" Fill="Transparent"/>
-                            <Line X1="12" Y1="8" X2="12" Y2="13" Stroke="Black" StrokeThickness="1"/>
-                            <Line X1="9" Y1="10" X2="15" Y2="10" Stroke="Black" StrokeThickness="1"/>
+                            <!-- Calendar page with a filled dot representing today -->
+                            <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="5" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
+                            <Rectangle Width="12" Height="3" Canvas.Left="6" Canvas.Top="3" Fill="Black"/>
+                            <Ellipse Width="6" Height="6" Canvas.Left="9" Canvas.Top="8" Fill="Black"/>
                         </Canvas>
                     </Viewbox>
                 </Button>
 
-                <Button Grid.Column="1" Name="PeopleButton" Click="PeopleButton_Click" ToolTip="People">
+                <!-- Tomorrow button -->
+                <Button Grid.Column="1" Name="TomorrowButton" Click="TomorrowButton_Click" ToolTip="Tomorrow">
+                    <Viewbox Width="18" Height="18">
+                        <Canvas Width="24" Height="24">
+                            <!-- Calendar page with small right arrow to indicate tomorrow -->
+                            <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="5" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
+                            <Rectangle Width="12" Height="3" Canvas.Left="6" Canvas.Top="3" Fill="Black"/>
+                            <Path Data="M13,9 L17,12 L13,15" Stroke="Black" StrokeThickness="1.4" StrokeEndLineCap="Round" StrokeStartLineCap="Round" Fill="Transparent"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+
+                <Button Grid.Column="2" Name="PeopleButton" Click="PeopleButton_Click" ToolTip="People">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
                             <Ellipse Width="6" Height="6" Canvas.Left="6" Canvas.Top="5" Stroke="Black" StrokeThickness="1.2" Fill="Transparent"/>
@@ -166,7 +190,7 @@
                     </Viewbox>
                 </Button>
 
-                <Button Grid.Column="2" Name="MeetingButton" Click="MeetingButton_Click" ToolTip="Meetings">
+                <Button Grid.Column="3" Name="MeetingButton" Click="MeetingButton_Click" ToolTip="Meetings">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
                             <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="6" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
@@ -177,7 +201,7 @@
                     </Viewbox>
                 </Button>
 
-                <Button Grid.Column="3" Name="AllButton" Click="AllButton_Click" ToolTip="All">
+                <Button Grid.Column="4" Name="AllButton" Click="AllButton_Click" ToolTip="All">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
                             <Line X1="4" Y1="7" X2="20" Y2="7" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>

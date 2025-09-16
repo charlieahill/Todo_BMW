@@ -26,6 +26,7 @@ namespace Todo
     public partial class MainWindow : Window
     {
         private const string SaveFileName = "tasks_by_date.json";
+        private const string MetaFileName = "meta.json";
 
         // All tasks keyed by date string (yyyy-MM-dd)
         private Dictionary<string, List<TaskModel>> AllTasks { get; set; } = new Dictionary<string, List<TaskModel>>();
@@ -48,11 +49,84 @@ namespace Todo
 
             SetCurrentDate(_currentDate);
 
+            // If application was last opened on a previous day, prompt to carry over unfinished tasks
+            HandleCarryOverIfNewDay();
+
             lbTasksList.ItemsSource = TaskList;
 
             Application.Current.Exit += Current_Exit;
 
             _isInitializing = false;
+        }
+
+        private class MetaInfo
+        {
+            public DateTime? LastOpened { get; set; }
+        }
+
+        private void HandleCarryOverIfNewDay()
+        {
+            try
+            {
+                MetaInfo meta = null;
+                if (File.Exists(MetaFileName))
+                {
+                    var jm = File.ReadAllText(MetaFileName);
+                    meta = JsonSerializer.Deserialize<MetaInfo>(jm);
+                }
+
+                var lastOpenedDate = meta?.LastOpened?.Date;
+                var today = DateTime.Today;
+
+                // update meta to now (save regardless so next run sees current open)
+                var newMeta = new MetaInfo { LastOpened = DateTime.Now };
+                try { File.WriteAllText(MetaFileName, JsonSerializer.Serialize(newMeta)); } catch { }
+
+                if (lastOpenedDate.HasValue && lastOpenedDate.Value < today)
+                {
+                    var key = DateKey(lastOpenedDate.Value);
+                    if (AllTasks.ContainsKey(key))
+                    {
+                        var incomplete = AllTasks[key].Where(t => !t.IsComplete).ToList();
+                        if (incomplete.Count > 0)
+                        {
+                            var dlg = new CarryOverDialog(incomplete) { Owner = this };
+                            if (dlg.ShowDialog() == true)
+                            {
+                                foreach (var item in dlg.Items)
+                                {
+                                    var t = item.Task;
+                                    if (item.IsMarkCompleted)
+                                    {
+                                        var found = AllTasks[key].FirstOrDefault(x => x.Id == t.Id);
+                                        if (found != null) found.IsComplete = true;
+                                    }
+                                    else if (item.IsCopyFuture && item.FutureDate.HasValue)
+                                    {
+                                        var newKey = DateKey(item.FutureDate.Value.Date);
+                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, Guid.NewGuid());
+                                        if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
+                                        AllTasks[newKey].Add(copy);
+                                    }
+                                    else // Copy to today (default)
+                                    {
+                                        var todayKey = DateKey(today);
+                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, Guid.NewGuid());
+                                        if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
+                                        AllTasks[todayKey].Add(copy);
+                                    }
+                                }
+
+                                SaveTasks();
+
+                                if (_currentDate == DateTime.Today)
+                                    LoadTasksForDate(DateTime.Today);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         private void Current_Exit(object sender, ExitEventArgs e)
@@ -442,6 +516,37 @@ namespace Todo
             CalendarPopup.IsOpen = true;
             CalendarControl.SelectedDate = _currentDate;
             Dispatcher.BeginInvoke(new Action(() => CalendarControl.Focus()), System.Windows.Threading.DispatcherPriority.Input);
+        }
+
+        private void JumpToTodayButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Close the calendar popup (if open) and jump to today's date
+            try
+            {
+                if (CalendarPopup != null)
+                {
+                    CalendarPopup.IsOpen = false;
+                }
+            }
+            catch { }
+
+            SetCurrentDate(DateTime.Today);
+
+            try
+            {
+                if (CalendarControl != null)
+                    CalendarControl.SelectedDate = DateTime.Today;
+            }
+            catch { }
+        }
+
+        private void TomorrowButton_Click(object sender, RoutedEventArgs e)
+        {
+            var tomorrow = DateTime.Today.AddDays(1);
+            // Close calendar popup if open
+            try { if (CalendarPopup != null) CalendarPopup.IsOpen = false; } catch { }
+            SetCurrentDate(tomorrow);
+            try { if (CalendarControl != null) CalendarControl.SelectedDate = tomorrow; } catch { }
         }
 
         private void CalendarControl_SelectedDatesChanged(object sender, SelectionChangedEventArgs e)
