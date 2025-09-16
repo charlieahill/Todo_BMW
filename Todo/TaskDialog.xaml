@@ -4,6 +4,7 @@
         Title="Edit Task" Height="820" Width="520" WindowStartupLocation="CenterOwner"
         Background="White" ResizeMode="CanResize">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <!-- Minimal, clean styles -->
         <Style TargetType="TextBox">
             <Setter Property="FontSize" Value="16"/>
@@ -55,6 +56,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- Title label -->
             <RowDefinition Height="Auto"/> <!-- Title box -->
+            <RowDefinition Height="Auto"/> <!-- Future toggle row -->
             <RowDefinition Height="Auto"/> <!-- Description label -->
             <RowDefinition Height="Auto"/> <!-- Description box -->
             <RowDefinition Height="Auto"/> <!-- People label -->
@@ -71,15 +73,21 @@
             <TextBox x:Name="TitleBox" />
         </Border>
 
+        <!-- Future toggle and date -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
+            <CheckBox Content="Show in future" IsChecked="{Binding IsFuture, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <DatePicker SelectedDate="{Binding FutureDate, Mode=TwoWay}" Width="180" Visibility="{Binding IsFuture, Converter={StaticResource BoolToVis}}"/>
+        </StackPanel>
+
         <!-- Description -->
-        <Label Grid.Row="2" Content="Description"/>
-        <Border Grid.Row="3" Background="#FFF8F8F8" CornerRadius="4" Padding="4" Margin="0,0,0,8">
+        <Label Grid.Row="3" Content="Description"/>
+        <Border Grid.Row="4" Background="#FFF8F8F8" CornerRadius="4" Padding="4" Margin="0,0,0,8">
             <TextBox x:Name="DescriptionBox" AcceptsReturn="True" Height="160" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
         </Border>
 
         <!-- People -->
-        <Label Grid.Row="4" Content="People"/>
-        <StackPanel Grid.Row="5" Orientation="Vertical">
+        <Label Grid.Row="5" Content="People"/>
+        <StackPanel Grid.Row="6" Orientation="Vertical">
             <Border Background="#FFF8F8F8" CornerRadius="4" Padding="4" Margin="0,0,0,6">
                 <DockPanel>
                     <ComboBox x:Name="PeopleBox" IsEditable="True" IsTextSearchEnabled="True" ItemsSource="{Binding PeopleSuggestions}" DockPanel.Dock="Left" Width="340"/>
@@ -92,8 +100,8 @@
         </StackPanel>
 
         <!-- Meetings -->
-        <Label Grid.Row="6" Content="Meetings"/>
-        <StackPanel Grid.Row="7" Orientation="Vertical">
+        <Label Grid.Row="7" Content="Meetings"/>
+        <StackPanel Grid.Row="8" Orientation="Vertical">
             <Border Background="#FFF8F8F8" CornerRadius="4" Padding="4" Margin="0,0,0,6">
                 <DockPanel>
                     <ComboBox x:Name="MeetingsBox" IsEditable="True" IsTextSearchEnabled="True" ItemsSource="{Binding MeetingSuggestions}" DockPanel.Dock="Left" Width="340"/>
@@ -106,7 +114,7 @@
         </StackPanel>
 
         <!-- Action buttons -->
-        <StackPanel Grid.Row="9" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,12">
+        <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,12">
             <Button Style="{StaticResource FlatButton}" Content="OK" Click="OkButton_Click" Margin="0,0,8,0"/>
             <Button Style="{StaticResource FlatButton}" Content="Cancel" Click="CancelButton_Click"/>
         </StackPanel>

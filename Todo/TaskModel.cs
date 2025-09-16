@@ -10,6 +10,18 @@ namespace Todo
     [Serializable]
     public class TaskModel : INotifyPropertyChanged
     {
+        private Guid _id = Guid.NewGuid();
+        public Guid Id
+        {
+            get => _id;
+            set
+            {
+                if (_id == value) return;
+                _id = value;
+                OnPropertyChanged(nameof(Id));
+            }
+        }
+
         private string _taskName = string.Empty;
         public string TaskName
         {
@@ -94,6 +106,30 @@ namespace Todo
             }
         }
 
+        private bool _isFuture = false;
+        public bool IsFuture
+        {
+            get => _isFuture;
+            set
+            {
+                if (_isFuture == value) return;
+                _isFuture = value;
+                OnPropertyChanged(nameof(IsFuture));
+            }
+        }
+
+        private DateTime? _futureDate = null;
+        public DateTime? FutureDate
+        {
+            get => _futureDate;
+            set
+            {
+                if (_futureDate == value) return;
+                _futureDate = value;
+                OnPropertyChanged(nameof(FutureDate));
+            }
+        }
+
         public override string ToString()
         {
             string completeAsString = "Complete";
@@ -109,14 +145,17 @@ namespace Todo
 
         }
 
-        public TaskModel(string taskname, bool iscomplete = false, bool isPlaceholder = false, string description = "", List<string> people = null, List<string> meetings = null)
+        public TaskModel(string taskname, bool iscomplete = false, bool isPlaceholder = false, string description = "", List<string> people = null, List<string> meetings = null, bool isFuture = false, DateTime? futureDate = null, Guid? id = null)
         {
+            Id = id ?? Guid.NewGuid();
             TaskName = taskname;
             IsComplete = iscomplete;
             IsPlaceholder = isPlaceholder;
             Description = description ?? string.Empty;
             People = people ?? new List<string>();
             Meetings = meetings ?? new List<string>();
+            IsFuture = isFuture;
+            FutureDate = futureDate;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

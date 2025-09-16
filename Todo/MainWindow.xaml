@@ -71,29 +71,71 @@
                     <ColumnDefinition Width="40"/>
                     <ColumnDefinition Width="40"/>
                 </Grid.ColumnDefinitions>
-                <Button Grid.Column="0" Name="PreviousDayButton" Click="PreviousDayButton_Click" Width="32" Height="32" FontWeight="Normal">&lt;</Button>
-                <Button Grid.Column="1" Name="CurrentDayButton" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0" IsHitTestVisible="False" Background="Transparent" BorderBrush="Transparent" FontWeight="Normal" Content="Wednesday, 27th August, 2025"/>
-                <Button Grid.Column="2" Name="CalendarButton" Click="CalendarButton_Click" Width="32" Height="32" Background="Transparent" BorderBrush="Transparent" ToolTip="Open calendar" FontWeight="Normal">
-                    <Viewbox Width="24" Height="24">
+
+                <!-- Date controls container -->
+                <Grid x:Name="DateControlsGrid" Grid.Column="0" Grid.ColumnSpan="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40"/>
+                        <ColumnDefinition Width="260"/>
+                        <ColumnDefinition Width="40"/>
+                        <ColumnDefinition Width="40"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Name="PreviousDayButton" Click="PreviousDayButton_Click" Width="32" Height="32" FontWeight="Normal">&lt;</Button>
+                    <Button Grid.Column="1" Name="CurrentDayButton" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0" IsHitTestVisible="False" Background="Transparent" BorderBrush="Transparent" FontWeight="Normal" Content="Wednesday, 27th August, 2025"/>
+                    <Button Grid.Column="2" Name="CalendarButton" Click="CalendarButton_Click" Width="32" Height="32" Background="Transparent" BorderBrush="Transparent" ToolTip="Open calendar" FontWeight="Normal">
+                        <Viewbox Width="24" Height="24">
+                            <Canvas Width="24" Height="24">
+                                <!-- Clean, contemporary calendar icon: outline only, no fill -->
+                                <Rectangle Width="18" Height="14" Stroke="Black" StrokeThickness="1.5" RadiusX="2" RadiusY="2" Canvas.Left="3" Canvas.Top="5" Fill="Transparent"/>
+                                <Line X1="3" Y1="9" X2="21" Y2="9" Stroke="Black" StrokeThickness="1.2"/>
+                                <Line X1="7" Y1="5" X2="7" Y2="3" Stroke="Black" StrokeThickness="1.5"/>
+                                <Line X1="17" Y1="5" X2="17" Y2="3" Stroke="Black" StrokeThickness="1.5"/>
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button Grid.Column="3" Name="NextDayButton" Click="NextDayButton_Click" Width="32" Height="32" FontWeight="Normal">&gt;</Button>
+                </Grid>
+
+                <!-- People filter combobox shown when in People mode -->
+                <ComboBox x:Name="PeopleFilterComboBox" Grid.Column="1" Width="240" Visibility="Collapsed" IsEditable="False" SelectionChanged="PeopleFilterComboBox_SelectionChanged" HorizontalAlignment="Left"/>
+
+                <!-- Meetings filter combobox shown when in Meetings mode -->
+                <ComboBox x:Name="MeetingsFilterComboBox" Grid.Column="1" Width="240" Visibility="Collapsed" IsEditable="False" SelectionChanged="MeetingsFilterComboBox_SelectionChanged" HorizontalAlignment="Left"/>
+
+                <!-- Search box shown when in All mode -->
+                <Grid Grid.Column="1" Width="240" Visibility="Collapsed" x:Name="SearchBoxBorder">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="24"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- Search icon (no underline) -->
+                    <Viewbox Grid.Column="0" Width="18" Height="18" VerticalAlignment="Center">
                         <Canvas Width="24" Height="24">
-                            <!-- Clean, contemporary calendar icon: outline only, no fill -->
-                            <Rectangle Width="18" Height="14" Stroke="Black" StrokeThickness="1.5" RadiusX="2" RadiusY="2" Canvas.Left="3" Canvas.Top="5" Fill="Transparent"/>
-                            <Line X1="3" Y1="9" X2="21" Y2="9" Stroke="Black" StrokeThickness="1.2"/>
-                            <Line X1="7" Y1="5" X2="7" Y2="3" Stroke="Black" StrokeThickness="1.5"/>
-                            <Line X1="17" Y1="5" X2="17" Y2="3" Stroke="Black" StrokeThickness="1.5"/>
+                            <Ellipse Width="12" Height="12" Canvas.Left="2" Canvas.Top="2" Stroke="Black" StrokeThickness="1.5" Fill="Transparent"/>
+                            <Line X1="14" Y1="14" X2="21" Y2="21" Stroke="Black" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                         </Canvas>
                     </Viewbox>
-                </Button>
-                <Button Grid.Column="3" Name="NextDayButton" Click="NextDayButton_Click" Width="32" Height="32" FontWeight="Normal">&gt;</Button>
+                    <!-- TextBox wrapped in a Border so the bottom hairline is only under the typing area -->
+                    <Border Grid.Column="1" x:Name="SearchTextBorder" BorderBrush="Black" BorderThickness="0,0,0,1" Background="Transparent" VerticalAlignment="Center">
+                        <TextBox x:Name="SearchTextBox" BorderThickness="0" Background="Transparent" Visibility="Collapsed" TextChanged="SearchTextBox_TextChanged" VerticalAlignment="Center" Padding="4,2"/>
+                    </Border>
+                </Grid>
 
                 <Popup x:Name="CalendarPopup" PlacementTarget="{Binding ElementName=CalendarButton}" Placement="Bottom" StaysOpen="False">
                     <Border Background="White">
                         <Calendar x:Name="CalendarControl" SelectedDatesChanged="CalendarControl_SelectedDatesChanged"/>
                     </Border>
                 </Popup>
+
+                <!-- Filter popup shown for people/meetings modes (unused when using combobox) -->
+                <Popup x:Name="FilterPopup" PlacementTarget="{Binding ElementName=CalendarButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                    <Border Background="White" Padding="6" CornerRadius="4" BorderBrush="#FFCCCCCC" BorderThickness="1">
+                        <ListBox x:Name="FilterListBox" Width="220" SelectionChanged="FilterListBox_SelectionChanged"/>
+                    </Border>
+                </Popup>
             </Grid>
 
-            <!--SEARCH-->
+            <!--MODE CONTROLS-->
             <Grid Grid.Column="1">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="25"/>
@@ -102,15 +144,19 @@
                     <ColumnDefinition Width="25"/>
                 </Grid.ColumnDefinitions>
 
-                <Button Grid.Column="0" Name="SearchButton" ToolTip="Search">
+                <!-- Today button -->
+                <Button Grid.Column="0" Name="TodayButton" Click="TodayButton_Click" ToolTip="Today">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
-                            <Ellipse Width="12" Height="12" Canvas.Left="2" Canvas.Top="2" Stroke="Black" StrokeThickness="1.5" Fill="Transparent"/>
-                            <Line X1="14" Y1="14" X2="21" Y2="21" Stroke="Black" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            <!-- Simple circle/day icon -->
+                            <Ellipse Width="14" Height="14" Canvas.Left="5" Canvas.Top="3" Stroke="Black" StrokeThickness="1.2" Fill="Transparent"/>
+                            <Line X1="12" Y1="8" X2="12" Y2="13" Stroke="Black" StrokeThickness="1"/>
+                            <Line X1="9" Y1="10" X2="15" Y2="10" Stroke="Black" StrokeThickness="1"/>
                         </Canvas>
                     </Viewbox>
                 </Button>
-                <Button Grid.Column="1" Name="PeopleButton" ToolTip="People">
+
+                <Button Grid.Column="1" Name="PeopleButton" Click="PeopleButton_Click" ToolTip="People">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
                             <Ellipse Width="6" Height="6" Canvas.Left="6" Canvas.Top="5" Stroke="Black" StrokeThickness="1.2" Fill="Transparent"/>
@@ -119,7 +165,8 @@
                         </Canvas>
                     </Viewbox>
                 </Button>
-                <Button Grid.Column="2" Name="MeetingButton" ToolTip="Meetings">
+
+                <Button Grid.Column="2" Name="MeetingButton" Click="MeetingButton_Click" ToolTip="Meetings">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
                             <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="6" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
@@ -129,7 +176,8 @@
                         </Canvas>
                     </Viewbox>
                 </Button>
-                <Button Grid.Column="3" Name="AllButton" ToolTip="All">
+
+                <Button Grid.Column="3" Name="AllButton" Click="AllButton_Click" ToolTip="All">
                     <Viewbox Width="18" Height="18">
                         <Canvas Width="24" Height="24">
                             <Line X1="4" Y1="7" X2="20" Y2="7" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>

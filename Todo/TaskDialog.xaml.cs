@@ -3,10 +3,12 @@ using System.Linq;
 using System.Windows;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
+using System;
+using System.ComponentModel;
 
 namespace Todo
 {
-    public partial class TaskDialog : Window
+    public partial class TaskDialog : Window, INotifyPropertyChanged
     {
         public string TaskTitle { get; set; }
         public string TaskDescription { get; set; }
@@ -14,6 +16,30 @@ namespace Todo
         public ObservableCollection<string> TaskMeetings { get; set; } = new ObservableCollection<string>();
         public ObservableCollection<string> PeopleSuggestions { get; set; } = new ObservableCollection<string>();
         public ObservableCollection<string> MeetingSuggestions { get; set; } = new ObservableCollection<string>();
+
+        private bool _isFuture;
+        public bool IsFuture
+        {
+            get => _isFuture;
+            set
+            {
+                if (_isFuture == value) return;
+                _isFuture = value;
+                OnPropertyChanged(nameof(IsFuture));
+            }
+        }
+
+        private DateTime? _futureDate;
+        public DateTime? FutureDate
+        {
+            get => _futureDate;
+            set
+            {
+                if (_futureDate == value) return;
+                _futureDate = value;
+                OnPropertyChanged(nameof(FutureDate));
+            }
+        }
 
         public TaskDialog(TaskModel model, IEnumerable<string> peopleSuggestions, IEnumerable<string> meetingSuggestions)
         {
@@ -24,6 +50,9 @@ namespace Todo
             TaskMeetings = new ObservableCollection<string>(model.Meetings ?? new List<string>());
             PeopleSuggestions = new ObservableCollection<string>(peopleSuggestions ?? Enumerable.Empty<string>());
             MeetingSuggestions = new ObservableCollection<string>(meetingSuggestions ?? Enumerable.Empty<string>());
+            IsFuture = model.IsFuture;
+            FutureDate = model.FutureDate;
+
             TitleBox.Text = TaskTitle;
             DescriptionBox.Text = TaskDescription;
             PeopleList.ItemsSource = TaskPeople;
@@ -99,7 +128,7 @@ namespace Todo
         {
             TaskTitle = TitleBox.Text;
             TaskDescription = DescriptionBox.Text;
-            // TaskPeople and TaskMeetings are observable collections; convert if callers expect List<string>
+            // ensure Future properties are updated from UI bindings
             DialogResult = true;
             Close();
         }
@@ -118,6 +147,12 @@ namespace Todo
         private void AddMeetingButton_Click(object sender, RoutedEventArgs e)
         {
             AddMeetingFromInput();
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        protected void OnPropertyChanged(string propertyName)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
     }
 }

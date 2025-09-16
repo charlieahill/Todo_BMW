@@ -183,6 +183,7 @@ namespace Todo
             {
                 task.IsReadOnly = !isToday;
             }
+            UpdateTitle();
             // SaveCurrentDateTasks(); // Removed to prevent wiping out tasks on startup
         }
 
@@ -194,8 +195,8 @@ namespace Todo
             {
                 foreach (var t in AllTasks[key])
                 {
-                    // Deep copy all properties
-                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings));
+                    // Deep copy all properties, including id and future scheduling
+                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id);
                     model.IsReadOnly = dt != DateTime.Today;
                     TaskList.Add(model);
                 }
@@ -290,10 +291,13 @@ namespace Todo
 
                 // update current date storage
                 var key = DateKey(_currentDate);
-                AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder).Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings))).ToList();
+                AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
+                    .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate))
+                    .ToList();
                 SaveTasks(); // Save immediately after any change for today
             }
             _placeholderJustFocused = false;
+            UpdateTitle();
         }
 
         private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
@@ -366,6 +370,60 @@ namespace Todo
             return $"{dt:dddd}, {day}{suffix} {dt:MMMM}, {dt:yyyy}";
         }
 
+        private string FormatDateShort(DateTime dt)
+        {
+            int day = dt.Day;
+            string suffix = GetOrdinalSuffix(day);
+            return $"{day}{suffix} {dt:MMMM} {dt:yyyy}";
+        }
+
+        private void UpdateTitle()
+        {
+            switch (_mode)
+            {
+                case ViewMode.Today:
+                    if (_currentDate == DateTime.Today)
+                    {
+                        this.Title = $"Todo | Today - {FormatDateShort(_currentDate)}";
+                    }
+                    else
+                    {
+                        this.Title = $"Todo | {FormatDateShort(_currentDate)}";
+                    }
+                    break;
+                case ViewMode.People:
+                    string person = null;
+                    if (PeopleFilterComboBox != null && PeopleFilterComboBox.SelectedItem is string p)
+                        person = p;
+                    if (string.IsNullOrEmpty(person))
+                        this.Title = "Todo | Tasks with Other People";
+                    else
+                        this.Title = $"Todo | Tasks with {person}";
+                    break;
+                case ViewMode.Meetings:
+                    string meeting = null;
+                    if (MeetingsFilterComboBox != null && MeetingsFilterComboBox.SelectedItem is string m)
+                        meeting = m;
+                    if (string.IsNullOrEmpty(meeting))
+                        this.Title = "Todo | All Meetings";
+                    else
+                        this.Title = $"Todo | Meeting {meeting}";
+                    break;
+                case ViewMode.All:
+                    string term = null;
+                    if (SearchTextBox != null)
+                        term = SearchTextBox.Text;
+                    if (string.IsNullOrWhiteSpace(term))
+                        this.Title = "Todo | All Tasks";
+                    else
+                        this.Title = $"Todo | Tasks containing {term}";
+                    break;
+                default:
+                    this.Title = "Todo";
+                    break;
+            }
+        }
+
         // Navigation handlers
         private void PreviousDayButton_Click(object sender, RoutedEventArgs e)
         {
@@ -395,6 +453,102 @@ namespace Todo
             }
         }
 
+        private enum ViewMode { Today, People, Meetings, All }
+        private ViewMode _mode = ViewMode.Today;
+        private string _activeFilter = null;
+
+        private void TodayButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Exit any special filter mode and return to today's view
+            // restore date controls
+            DateControlsGrid.Visibility = Visibility.Visible;
+            // hide people/meetings filter comboboxes
+            if (PeopleFilterComboBox != null) PeopleFilterComboBox.Visibility = Visibility.Collapsed;
+            if (MeetingsFilterComboBox != null) MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
+            // hide search UI
+            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+
+            _mode = ViewMode.Today;
+            _activeFilter = null;
+            FilterPopup.IsOpen = false;
+            CalendarPopup.IsOpen = false;
+            SetCurrentDate(DateTime.Today);
+        }
+
+        private void PeopleButton_Click(object sender, RoutedEventArgs e)
+        {
+            _mode = ViewMode.People;
+            // hide date controls and show people combobox
+            DateControlsGrid.Visibility = Visibility.Collapsed;
+            PeopleFilterComboBox.Visibility = Visibility.Visible;
+            // hide search box if visible
+            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+            MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
+            // populate people combobox
+            var people = AllTasks.Values.SelectMany(l => l.SelectMany(t => t.People)).Distinct().OrderBy(s => s).ToList();
+            people.Insert(0, ""); // blank = any
+            PeopleFilterComboBox.ItemsSource = people;
+            PeopleFilterComboBox.SelectedIndex = 0;
+            // show all tasks that have any people
+            // ApplyPeopleFilter may be implemented elsewhere; if not, fallback to ApplyFilter
+            try { ApplyPeopleFilter(null); } catch { ApplyFilter(); }
+            UpdateTitle();
+        }
+
+        private void MeetingButton_Click(object sender, RoutedEventArgs e)
+        {
+            _mode = ViewMode.Meetings;
+            // hide date controls and show meetings combobox
+            DateControlsGrid.Visibility = Visibility.Collapsed;
+            MeetingsFilterComboBox.Visibility = Visibility.Visible;
+            // hide search box if visible
+            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+            PeopleFilterComboBox.Visibility = Visibility.Collapsed;
+            // populate meetings combobox
+            var meetings = AllTasks.Values.SelectMany(l => l.SelectMany(t => t.Meetings)).Distinct().OrderBy(s => s).ToList();
+            meetings.Insert(0, ""); // blank = any
+            MeetingsFilterComboBox.ItemsSource = meetings;
+            MeetingsFilterComboBox.SelectedIndex = 0;
+            // show all tasks that have any meetings
+            try { ApplyMeetingsFilter(null); } catch { ApplyFilter(); }
+            UpdateTitle();
+        }
+
+        private void AllButton_Click(object sender, RoutedEventArgs e)
+        {
+            _mode = ViewMode.All;
+            FilterPopup.IsOpen = false;
+            CalendarPopup.IsOpen = false;
+
+            // Show search box and hide date controls
+            DateControlsGrid.Visibility = Visibility.Collapsed;
+            PeopleFilterComboBox.Visibility = Visibility.Collapsed;
+            MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Visible;
+            if (SearchTextBox != null)
+            {
+                SearchTextBox.Visibility = Visibility.Visible;
+                SearchTextBox.Text = string.Empty;
+                SearchTextBox.Focus();
+            }
+
+            // Load all tasks
+            try { ApplyAllFilter(SearchTextBox?.Text); } catch { ApplyFilter(); }
+            UpdateTitle();
+        }
+
+        private void ExitAllMode()
+        {
+            DateControlsGrid.Visibility = Visibility.Visible;
+            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+            _mode = ViewMode.Today;
+            SetCurrentDate(_currentDate);
+        }
+
         // Helper to find child of type T in visual tree
         private static T FindVisualChild<T>(DependencyObject obj) where T : DependencyObject
         {
@@ -418,7 +572,7 @@ namespace Todo
             if (_currentDate == null) return;
             var key = DateKey(_currentDate);
             var realTasks = TaskList.Where(t => !t.IsPlaceholder)
-                .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings)))
+                .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id))
                 .ToList();
 
             if (realTasks.Count > 0)
@@ -436,18 +590,200 @@ namespace Todo
         {
             if (sender is Button btn && btn.DataContext is TaskModel task && !task.IsPlaceholder)
             {
+                // capture origin info
+                var originKey = DateKey(_currentDate);
+                var originalId = task.Id;
+
                 // Gather suggestions from all tasks
                 var allPeople = AllTasks.Values.SelectMany(list => list.SelectMany(t => t.People)).Distinct().ToList();
                 var allMeetings = AllTasks.Values.SelectMany(list => list.SelectMany(t => t.Meetings)).Distinct().ToList();
                 var dialog = new TaskDialog(task, allPeople, allMeetings) { Owner = this };
                 if (dialog.ShowDialog() == true)
                 {
+                    // update task properties from dialog
                     task.TaskName = dialog.TaskTitle;
                     task.Description = dialog.TaskDescription;
                     task.People = new List<string>(dialog.TaskPeople);
                     task.Meetings = new List<string>(dialog.TaskMeetings);
+
+                    // handle future scheduling
+                    task.IsFuture = dialog.IsFuture;
+                    task.FutureDate = dialog.FutureDate;
+
+                    var todayKey = DateKey(DateTime.Today);
+
+                    if (task.IsFuture && task.FutureDate.HasValue)
+                    {
+                        var newKey = DateKey(task.FutureDate.Value.Date);
+
+                        // remove this task from any date it currently exists under (by id)
+                        foreach (var k in AllTasks.Keys.ToList())
+                        {
+                            AllTasks[k].RemoveAll(t => t.Id == originalId);
+                            if (AllTasks[k].Count == 0) AllTasks.Remove(k);
+                        }
+
+                        // add to AllTasks under future date
+                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People), new List<string>(task.Meetings), true, task.FutureDate, task.Id);
+                        if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
+                        AllTasks[newKey].Add(copy);
+
+                        // remove from current TaskList if viewing that date
+                        if (originKey == DateKey(_currentDate))
+                        {
+                            TaskList.Remove(task);
+                            EnsureHasPlaceholder();
+                        }
+                    }
+                    else
+                    {
+                        // remove this task from any date it currentlyexists under
+                        foreach (var k in AllTasks.Keys.ToList())
+                        {
+                            AllTasks[k].RemoveAll(t => t.Id == originalId);
+                            if (AllTasks[k].Count == 0) AllTasks.Remove(k);
+                        }
+
+                        // move to today's storage
+                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People), new List<string>(task.Meetings), false, null, task.Id);
+                        if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
+                        AllTasks[todayKey].Add(copy);
+
+                        // ensure TaskList contains the task instance (moved back to today)
+                        if (_currentDate == DateTime.Today)
+                        {
+                            if (!TaskList.Contains(task))
+                            {
+                                task.IsReadOnly = false;
+                                TaskList.Insert(TaskList.Count - 1, task);
+                            }
+                        }
+                    }
+
                     SaveTasks(); // Save after editing a task
                 }
+            }
+        }
+
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            // For now, search behaves like Today (clears filters).
+            _mode = ViewMode.Today;
+            FilterPopup.IsOpen = false;
+            CalendarPopup.IsOpen = false;
+            SetCurrentDate(DateTime.Today);
+        }
+
+        private void FilterListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (FilterListBox.SelectedItem is string s)
+            {
+                _activeFilter = s;
+                ApplyFilter();
+                FilterPopup.IsOpen = false;
+                UpdateTitle();
+            }
+        }
+
+        private void ApplyFilter()
+        {
+            TaskList.Clear();
+
+            IEnumerable<TaskModel> tasks = AllTasks.Values.SelectMany(list => list);
+
+            // Apply active filter
+            if (!string.IsNullOrEmpty(_activeFilter))
+            {
+                tasks = tasks.Where(t => t.Meetings != null && t.Meetings.Contains(_activeFilter));
+            }
+
+            // Deduplicate by Id
+            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
+
+            foreach (var t in unique)
+            {
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+            }
+        }
+
+        // People combobox selection handler
+        private void PeopleFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (PeopleFilterComboBox.SelectedItem is string s && string.IsNullOrEmpty(s))
+            {
+                ApplyPeopleFilter(null);
+            }
+            else if (PeopleFilterComboBox.SelectedItem is string name)
+            {
+                ApplyPeopleFilter(name);
+            }
+            UpdateTitle();
+        }
+
+        // Meetings combobox selection handler
+        private void MeetingsFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (MeetingsFilterComboBox.SelectedItem is string s && string.IsNullOrEmpty(s))
+            {
+                ApplyMeetingsFilter(null);
+            }
+            else if (MeetingsFilterComboBox.SelectedItem is string name)
+            {
+                ApplyMeetingsFilter(name);
+            }
+            UpdateTitle();
+        }
+
+        // Search textbox change handler
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var tb = sender as TextBox;
+            ApplyAllFilter(tb?.Text);
+            UpdateTitle();
+        }
+
+        private void ApplyPeopleFilter(string person)
+        {
+            TaskList.Clear();
+            var tasks = AllTasks.Values.SelectMany(list => list).Where(t => t.People != null && t.People.Count > 0);
+            if (!string.IsNullOrEmpty(person))
+                tasks = tasks.Where(t => t.People.Contains(person));
+
+            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
+            foreach (var t in unique)
+            {
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+            }
+        }
+
+        private void ApplyMeetingsFilter(string meeting)
+        {
+            TaskList.Clear();
+            var tasks = AllTasks.Values.SelectMany(list => list).Where(t => t.Meetings != null && t.Meetings.Count > 0);
+            if (!string.IsNullOrEmpty(meeting))
+                tasks = tasks.Where(t => t.Meetings.Contains(meeting));
+
+            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
+            foreach (var t in unique)
+            {
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+            }
+        }
+
+        private void ApplyAllFilter(string term)
+        {
+            TaskList.Clear();
+            var tasks = AllTasks.Values.SelectMany(list => list).ToList();
+            if (!string.IsNullOrEmpty(term))
+            {
+                term = term.ToLowerInvariant();
+                tasks = tasks.Where(t => (!string.IsNullOrEmpty(t.TaskName) && t.TaskName.ToLowerInvariant().Contains(term)) || (!string.IsNullOrEmpty(t.Description) && t.Description.ToLowerInvariant().Contains(term))).ToList();
+            }
+
+            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
+            foreach (var t in unique)
+            {
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
             }
         }
     }
