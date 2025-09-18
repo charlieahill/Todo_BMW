@@ -287,7 +287,7 @@
              </Grid>
         </Grid>
 
-        <ListView Grid.Row="1" Margin="20" Name="lbTasksList" Background="White">
+        <ListView Grid.Row="1" Margin="20" Name="lbTasksList" Background="White" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -305,7 +305,7 @@
                                 <ColumnDefinition Width="32"/>
                             </Grid.ColumnDefinitions>
                             <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsComplete}" Click="CheckBox_Click"/>
-                            <StackPanel Grid.Column="1" Orientation="Vertical">
+                            <Grid Grid.Column="1">
                                 <TextBox x:Name="TaskTextBox"
                                          Text="{Binding TaskName, UpdateSourceTrigger=PropertyChanged}"
                                          Foreground="Black"
@@ -319,7 +319,11 @@
                                          TextChanged="TaskTextBox_TextChanged"
                                          GotFocus="TaskTextBox_GotFocus"
                                          LostFocus="TaskTextBox_LostFocus"
-                                         PreviewTextInput="TaskTextBox_PreviewTextInput">
+                                         PreviewTextInput="TaskTextBox_PreviewTextInput"
+                                         TextWrapping="Wrap"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         HorizontalAlignment="Stretch"
+                                         AcceptsReturn="False">
                                     <TextBox.Style>
                                         <Style TargetType="TextBox">
                                             <Setter Property="Foreground" Value="Black"/>
@@ -343,7 +347,7 @@
                                     <TextBox.Template>
                                         <ControlTemplate TargetType="TextBox">
                                             <Grid>
-                                                <ScrollViewer x:Name="PART_ContentHost"/>
+                                                <ScrollViewer x:Name="PART_ContentHost" HorizontalScrollBarVisibility="Disabled"/>
                                                 <TextBlock Text="Type new task here..."
                                                            Foreground="Gray"
                                                            FontStyle="Italic"
@@ -357,7 +361,7 @@
                                         </ControlTemplate>
                                     </TextBox.Template>
                                 </TextBox>
-                            </StackPanel>
+                            </Grid>
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
                                 <!-- Description Icon -->

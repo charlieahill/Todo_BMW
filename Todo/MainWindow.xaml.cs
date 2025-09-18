@@ -133,7 +133,7 @@ namespace Todo
         {
             // Force all TaskTextBox controls to lose focus and update their bindings
             CommitAllTaskEdits();
-            SaveCurrentDateTasks();
+            // Save tasks; SaveTasks will decide whether to persist current-date TaskList or just AllTasks
             SaveTasks();
         }
 
@@ -208,7 +208,14 @@ namespace Todo
             LogAllTasks(); // Debug log before saving
             try
             {
-                SaveCurrentDateTasks(); // Ensure current day's tasks are saved before serializing
+                // Only persist the current TaskList into AllTasks when we're in Today view.
+                // When in filtered views (People/Meetings/All) TaskList contains a subset of items across dates
+                // and we must not overwrite the stored tasks for any date with that subset.
+                if (_mode == ViewMode.Today)
+                {
+                    SaveCurrentDateTasks(); // Ensure current day's tasks are saved before serializing
+                }
+
                 // ensure we don't save placeholder items
                 var sanitized = new Dictionary<string, List<TaskModel>>();
                 foreach (var kv in AllTasks)
@@ -340,7 +347,28 @@ namespace Todo
             }
         }
 
-        // In TaskTextBox_PreviewTextInput, prevent typing for non-today
+        private void TaskTextBlock_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            // When the preview TextBlock is clicked, focus the underlying TextBox for editing
+            try
+            {
+                if (sender is TextBlock tb && tb.DataContext is TaskModel tm)
+                {
+                    var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(tm) as ListViewItem;
+                    if (listViewItem != null)
+                    {
+                        var textBox = FindVisualChild<TextBox>(listViewItem);
+                        if (textBox != null)
+                        {
+                            textBox.Focus();
+                            textBox.CaretIndex = textBox.Text?.Length ?? 0;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
         private void TaskTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
         {
             if (_currentDate != DateTime.Today)
@@ -403,8 +431,42 @@ namespace Todo
                 e.Handled = true;
                 return;
             }
+
+            // If Enter pressed, move focus to the next task line (create placeholder if needed)
+            if (e.Key == Key.Enter && sender is TextBox tb && tb.DataContext is TaskModel tm)
+            {
+                // If we're on the last real item and it has text, ensure a placeholder exists before moving
+                if (TaskList.Last() == tm && !tm.IsPlaceholder && !string.IsNullOrWhiteSpace(tb.Text))
+                {
+                    EnsureHasPlaceholder();
+                }
+
+                var idx = TaskList.IndexOf(tm);
+                if (idx >= 0)
+                {
+                    var nextIdx = Math.Min(idx + 1, TaskList.Count - 1);
+                    var next = TaskList[nextIdx];
+                    var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(next) as ListViewItem;
+                    if (listViewItem != null)
+                    {
+                        var nextTextBox = FindVisualChild<TextBox>(listViewItem);
+                        if (nextTextBox != null)
+                        {
+                            nextTextBox.Focus();
+                            nextTextBox.CaretIndex = nextTextBox.Text?.Length ?? 0;
+                        }
+                        else
+                        {
+                            // Fallback: move focus programmatically
+                            Keyboard.Focus(listViewItem);
+                        }
+                    }
+                }
+
+                e.Handled = true;
+            }
+
             // Save after key up for today
-            SaveCurrentDateTasks();
             SaveTasks();
         }
 
@@ -424,24 +486,35 @@ namespace Todo
                 }
             }
             // Save after lost focus for today
-            SaveCurrentDateTasks();
             SaveTasks();
         }
 
         // Prevent checking/unchecking for non-today
         private void CheckBox_Click(object sender, RoutedEventArgs e)
         {
-            if (_currentDate != DateTime.Today)
-            {
-                if (sender is CheckBox cb)
-                {
-                    cb.IsChecked = ((TaskModel)cb.DataContext).IsComplete;
-                }
-                e.Handled = true;
-            }
-            else
+            // If we're in Today view, follow the original behavior and persist via SaveTasks
+            if (_mode == ViewMode.Today)
             {
                 // Save after completion state changes for today
+                SaveTasks();
+                return;
+            }
+
+            // For filtered views (People/Meetings/All) the TaskList contains a subset of tasks across dates.
+            // Update the corresponding task(s) in AllTasks by Id so we don't overwrite other items.
+            if (sender is CheckBox cb && cb.DataContext is TaskModel tm)
+            {
+                // Apply the IsComplete value to all matching tasks in storage
+                foreach (var k in AllTasks.Keys.ToList())
+                {
+                    var list = AllTasks[k];
+                    foreach (var stored in list.Where(x => x.Id == tm.Id))
+                    {
+                        stored.IsComplete = tm.IsComplete;
+                    }
+                }
+
+                // Persist the updated AllTasks
                 SaveTasks();
             }
         }
@@ -727,36 +800,103 @@ namespace Todo
                 var dialog = new TaskDialog(task, allPeople, allMeetings) { Owner = this };
                 if (dialog.ShowDialog() == true)
                 {
-                    // update task properties from dialog
+                    // update task properties from dialog (UI model)
                     task.TaskName = dialog.TaskTitle;
                     task.Description = dialog.TaskDescription;
                     task.People = new List<string>(dialog.TaskPeople);
                     task.Meetings = new List<string>(dialog.TaskMeetings);
 
-                    // handle future scheduling
+                    // handle future scheduling on UI model
                     task.IsFuture = dialog.IsFuture;
                     task.FutureDate = dialog.FutureDate;
 
                     var todayKey = DateKey(DateTime.Today);
+                    string targetKey = null;
 
+                    // Find where this task currently exists in storage (preserve ordering/index)
+                    var storedEntries = AllTasks
+                        .SelectMany(kv => kv.Value.Select((t, idx) => new { Key = kv.Key, Task = t, Index = idx }))
+                        .Where(x => x.Task.Id == originalId)
+                        .ToList();
+
+                    // Determine desired target key:
+                    // - If user marked as future with a date, use that date
+                    // - Else, if task already exists in storage, keep its existing date (don't move to today)
+                    // - Else default to today
                     if (task.IsFuture && task.FutureDate.HasValue)
                     {
-                        var newKey = DateKey(task.FutureDate.Value.Date);
+                        targetKey = DateKey(task.FutureDate.Value.Date);
+                    }
+                    else if (storedEntries.Any())
+                    {
+                        // Keep the first existing date to preserve original placement unless user explicitly moved the date
+                        targetKey = storedEntries.First().Key;
+                    }
+                    else
+                    {
+                        targetKey = todayKey;
+                    }
 
-                        // remove this task from any date it currently exists under (by id)
-                        foreach (var k in AllTasks.Keys.ToList())
+                    // Update or move in storage while preserving ordering when possible
+                    // 1) Update any stored entries that already live in targetKey in place
+                    bool updatedInPlace = false;
+                    if (AllTasks.ContainsKey(targetKey))
+                    {
+                        var list = AllTasks[targetKey];
+                        for (int i = 0; i < list.Count; i++)
                         {
-                            AllTasks[k].RemoveAll(t => t.Id == originalId);
-                            if (AllTasks[k].Count == 0) AllTasks.Remove(k);
+                            if (list[i].Id == originalId)
+                            {
+                                // Update properties in place to preserve ordering
+                                list[i].TaskName = task.TaskName;
+                                list[i].Description = task.Description;
+                                list[i].People = new List<string>(task.People ?? new List<string>());
+                                list[i].Meetings = new List<string>(task.Meetings ?? new List<string>());
+                                list[i].IsFuture = task.IsFuture;
+                                list[i].FutureDate = task.FutureDate;
+                                list[i].IsComplete = task.IsComplete;
+                                updatedInPlace = true;
+                                // If the UI model has SetDate/ShowDate, leave them to be derived when reloading
+                            }
+                        }
+                    }
+
+                    // 2) Remove this task from any other buckets where it previously existed (if moving)
+                    foreach (var k in AllTasks.Keys.ToList())
+                    {
+                        if (k == targetKey) continue; // keep target bucket
+                        var countBefore = AllTasks[k].Count;
+                        AllTasks[k].RemoveAll(t => t.Id == originalId);
+                        if (AllTasks[k].Count == 0)
+                            AllTasks.Remove(k);
+                    }
+
+                    // 3) If we didn't update in place, add to the target bucket (preserve existing relative ordering not possible here)
+                    if (!updatedInPlace)
+                    {
+                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People ?? new List<string>()), new List<string>(task.Meetings ?? new List<string>()), task.IsFuture, task.FutureDate, task.Id);
+                        if (!AllTasks.ContainsKey(targetKey)) AllTasks[targetKey] = new List<TaskModel>();
+
+                        // If there was an original stored entry we removed above, try to insert at its original index
+                        var originalStored = storedEntries.FirstOrDefault();
+                        if (originalStored != null && originalStored.Key != targetKey)
+                        {
+                            // If original bucket existed and we removed it, just append to target (cannot preserve cross-bucket position)
+                            AllTasks[targetKey].Add(copy);
+                        }
+                        else if (originalStored == null)
+                        {
+                            // New task - append
+                            AllTasks[targetKey].Add(copy);
+                        }
+                        else
+                        {
+                            // Shouldn't usually get here, but append as fallback
+                            AllTasks[targetKey].Add(copy);
                         }
 
-                        // add to AllTasks under future date
-                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People), new List<string>(task.Meetings), true, task.FutureDate, task.Id);
-                        if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
-                        AllTasks[newKey].Add(copy);
-
-                        // remove from current TaskList if viewing that date
-                        if (originKey == DateKey(_currentDate))
+                        // If the task was visible in the current TaskList (we were viewing that date), remove it if it moved away
+                        if (originKey == DateKey(_currentDate) && targetKey != originKey)
                         {
                             TaskList.Remove(task);
                             EnsureHasPlaceholder();
@@ -764,26 +904,16 @@ namespace Todo
                     }
                     else
                     {
-                        // remove this task from any date it currentlyexists under
-                        foreach (var k in AllTasks.Keys.ToList())
+                        // If updated in place and we are viewing that date, update the UI model so it reflects any changes
+                        if (_currentDate == DateTime.ParseExact(targetKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
                         {
-                            AllTasks[k].RemoveAll(t => t.Id == originalId);
-                            if (AllTasks[k].Count == 0) AllTasks.Remove(k);
+                            // UI model 'task' already has the updated values from dialog above.
+                            // Nothing more to do for ordering.
                         }
-
-                        // move to today's storage
-                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People), new List<string>(task.Meetings), false, null, task.Id);
-                        if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
-                        AllTasks[todayKey].Add(copy);
-
-                        // ensure TaskList contains the task instance (moved back to today)
-                        if (_currentDate == DateTime.Today)
+                        else
                         {
-                            if (!TaskList.Contains(task))
-                            {
-                                task.IsReadOnly = false;
-                                TaskList.Insert(TaskList.Count - 1, task);
-                            }
+                            // If the task was updated in place in storage but we're not viewing that date,
+                            // we don't need to modify TaskList here.
                         }
                     }
 
