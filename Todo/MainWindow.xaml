@@ -16,6 +16,7 @@
         </Style>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <local:CountToVisibilityConverter x:Key="CountToVis"/>
+        <!-- CountToVisibilityConverter will be added in code-behind at runtime -->
 
         <!-- Clean filter ComboBox style for People/Meetings modes -->
         <Style x:Key="FilterComboBoxStyle" TargetType="ComboBox">
@@ -400,15 +401,37 @@
                                         <Line X1="12" Y1="13" X2="14" Y2="13" Stroke="DarkSlateGray" StrokeThickness="1"/>
                                     </Canvas>
                                 </Viewbox>
-                                <!-- Link Icon (paperclip) -->
-                                <Viewbox Width="18" Height="18" Visibility="{Binding HasLink, Converter={StaticResource BoolToVis}}">
-                                    <Canvas Width="24" Height="24">
-                                        <!-- Paperclip style link icon -->
-                                        <Path Stroke="DarkSlateGray" StrokeThickness="1.4" Fill="Transparent" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M7,14 L10,11 C12,9 16,9 18,11 C20,13 20,16 18,18 L15,21 C13,23 9,23 7,21 C5,19 5,16 7,14"/>
-                                        <Path Stroke="DarkSlateGray" StrokeThickness="1.2" Fill="Transparent" Data="M9,12 L12,9 C13.5,7.5 16.5,7.5 18,9 C19.5,10.5 19.5,13 18,14.5 L15,17.5 C14,18.5 12,18.5 11,17.5"/>
-                                    </Canvas>
-                                </Viewbox>
-                            </StackPanel>
+                                <!-- Link icons: folder, file, or web (globe) -->
+                                <Button Click="OpenLinkButton_Click" Background="Transparent" BorderThickness="0" Padding="0" Width="18" Height="18" Visibility="{Binding IsLinkFolder, Converter={StaticResource BoolToVis}}" ToolTip="{Binding LinkPath}" Cursor="Hand">
+                                    <Viewbox Width="18" Height="18">
+                                        <Canvas Width="24" Height="24">
+                                            <!-- Folder icon -->
+                                            <Path Stroke="DarkSlateGray" StrokeThickness="1.2" Fill="Transparent" Data="M3,8 L3,18 L21,18 L21,8 L12,8 L10,6 L3,6 Z"/>
+                                        </Canvas>
+                                    </Viewbox>
+                                </Button>
+
+                                <Button Click="OpenLinkButton_Click" Background="Transparent" BorderThickness="0" Padding="0" Width="18" Height="18" Visibility="{Binding IsLinkFile, Converter={StaticResource BoolToVis}}" ToolTip="{Binding LinkPath}" Cursor="Hand" Margin="4,0,0,0">
+                                    <Viewbox Width="18" Height="18">
+                                        <Canvas Width="24" Height="24">
+                                            <!-- File icon -->
+                                            <Path Stroke="DarkSlateGray" StrokeThickness="1.2" Fill="Transparent" Data="M6,3 L14,3 L18,7 L18,21 L6,21 Z"/>
+                                            <Line X1="9" Y1="10" X2="15" Y2="10" Stroke="DarkSlateGray" StrokeThickness="1"/>
+                                            <Line X1="9" Y1="14" X2="15" Y2="14" Stroke="DarkSlateGray" StrokeThickness="1"/>
+                                        </Canvas>
+                                    </Viewbox>
+                                </Button>
+
+                                <Button Click="OpenLinkButton_Click" Background="Transparent" BorderThickness="0" Padding="0" Width="18" Height="18" Visibility="{Binding IsLinkWeb, Converter={StaticResource BoolToVis}}" ToolTip="{Binding LinkPath}" Cursor="Hand" Margin="4,0,0,0">
+                                    <Viewbox Width="18" Height="18">
+                                        <Canvas Width="24" Height="24">
+                                            <!-- Simple globe icon: circle with meridian and latitude lines -->
+                                            <Ellipse Stroke="DarkSlateGray" StrokeThickness="1.2" Fill="Transparent" Width="16" Height="16" Canvas.Left="4" Canvas.Top="4"/>
+                                            <Path Stroke="DarkSlateGray" StrokeThickness="1" Fill="Transparent" Data="M12,4 L12,20 M4,12 L20,12 M6,7 C8,9 16,9 18,7 M6,17 C8,15 16,15 18,17"/>
+                                        </Canvas>
+                                    </Viewbox>
+                                </Button>
+                             </StackPanel>
 
                             <!-- Date on the same row, right aligned -->
                             <TextBlock Grid.Column="3"
@@ -427,5 +450,11 @@
                 </DataTemplate>
             </ListView.ItemTemplate>
         </ListView>
+
+        <!-- Backup now button moved to bottom-right -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,8">
+            <TextBlock x:Name="LastBackupTextBlock" Text="Last backup: --" VerticalAlignment="Center" Foreground="Gray" Margin="0,0,8,0"/>
+            <Button Name="BackupNowButton" Click="BackupNowButton_Click" ToolTip="Create immediate backup of tasks" Padding="8,4">Backup now</Button>
+        </StackPanel>
     </Grid>
 </Window>

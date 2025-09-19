@@ -16,7 +16,44 @@ namespace Todo
         public ObservableCollection<string> TaskMeetings { get; set; } = new ObservableCollection<string>();
         public ObservableCollection<string> PeopleSuggestions { get; set; } = new ObservableCollection<string>();
         public ObservableCollection<string> MeetingSuggestions { get; set; } = new ObservableCollection<string>();
-        public string LinkPath { get; set; }
+        private string _linkPath = string.Empty;
+        public string LinkPath
+        {
+            get => _linkPath;
+            set
+            {
+                if (_linkPath == value) return;
+                _linkPath = value ?? string.Empty;
+                // Keep the displayed textbox in sync if available
+                try { if (LinkBox != null) LinkBox.Text = _linkPath; } catch { }
+                OnPropertyChanged(nameof(LinkPath));
+                UpdateLinkFlags();
+            }
+        }
+
+        private bool _isHyperlink;
+        public bool IsHyperlink
+        {
+            get => _isHyperlink;
+            private set
+            {
+                if (_isHyperlink == value) return;
+                _isHyperlink = value;
+                OnPropertyChanged(nameof(IsHyperlink));
+            }
+        }
+
+        private bool _hasLink;
+        public bool HasLink
+        {
+            get => _hasLink;
+            private set
+            {
+                if (_hasLink == value) return;
+                _hasLink = value;
+                OnPropertyChanged(nameof(HasLink));
+            }
+        }
 
         private bool _isFuture;
         public bool IsFuture
@@ -163,7 +200,6 @@ namespace Todo
                 var dlg = new Microsoft.Win32.OpenFileDialog();
                 if (dlg.ShowDialog(this) == true)
                 {
-                    LinkBox.Text = dlg.FileName;
                     LinkPath = dlg.FileName;
                 }
             }
@@ -179,12 +215,54 @@ namespace Todo
                     var res = fbd.ShowDialog();
                     if (res == System.Windows.Forms.DialogResult.OK)
                     {
-                        LinkBox.Text = fbd.SelectedPath;
                         LinkPath = fbd.SelectedPath;
                     }
                 }
             }
             catch { }
+        }
+
+        private void PasteLinkButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (Clipboard.ContainsText())
+                {
+                    var text = (Clipboard.GetText() ?? string.Empty).Trim();
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        LinkPath = text;
+                    }
+                    else
+                    {
+                        MessageBox.Show("Clipboard does not contain a valid link.", "Paste Link", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("Clipboard does not contain text to paste.", "Paste Link", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch { }
+        }
+
+        private void UpdateLinkFlags()
+        {
+            HasLink = !string.IsNullOrWhiteSpace(_linkPath);
+            bool isHttp = false;
+            if (HasLink)
+            {
+                try
+                {
+                    if (Uri.TryCreate(_linkPath, UriKind.Absolute, out var u))
+                    {
+                        var s = u.Scheme?.ToLowerInvariant();
+                        if (s == "http" || s == "https") isHttp = true;
+                      }
+                }
+                catch { }
+            }
+            IsHyperlink = isHttp;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

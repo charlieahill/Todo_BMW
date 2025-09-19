@@ -37,6 +37,12 @@ namespace Todo
 
         private bool _isInitializing = false;
 
+        // Auto-backup support
+        private DispatcherTimer _autoBackupTimer;
+        private const string AutoBackupFolder = "autobackups";
+        private const int AutoBackupKeep = 10;
+        private readonly TimeSpan AutoBackupInterval = TimeSpan.FromMinutes(15);
+
         public MainWindow()
         {
             InitializeComponent();
@@ -56,6 +62,28 @@ namespace Todo
             lbTasksList.MouseDoubleClick += LbTasksList_MouseDoubleClick;
 
             Application.Current.Exit += Current_Exit;
+
+            // Start automatic backups
+            try
+            {
+                _autoBackupTimer = new DispatcherTimer { Interval = AutoBackupInterval };
+                _autoBackupTimer.Tick += (s, e) => {
+                    try { AutoBackupNow(); } catch { }
+                };
+                _autoBackupTimer.Start();
+            }
+            catch { }
+
+            // Initialize last backup display
+            try
+            {
+                var latest = FindLatestBackupTimestamp();
+                if (latest.HasValue)
+                    UpdateLastBackupText(latest.Value);
+                else
+                    UpdateLastBackupText(null);
+            }
+            catch { UpdateLastBackupText(null); }
 
             _isInitializing = false;
         }
@@ -77,6 +105,25 @@ namespace Todo
                 }
 
                 var lastOpenedDate = meta?.LastOpened?.Date;
+
+                // If meta is missing, attempt to infer the last-opened date from saved task keys.
+                if (!lastOpenedDate.HasValue)
+                {
+                    try
+                    {
+                        var candidateDates = AllTasks.Keys
+                            .Select(k => { DateTime dt; return new { Ok = DateTime.TryParseExact(k, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt), Date = dt }; })
+                            .Where(x => x.Ok)
+                            .Select(x => x.Date)
+                            .ToList();
+                        if (candidateDates.Count > 0)
+                        {
+                            lastOpenedDate = candidateDates.Max();
+                        }
+                    }
+                    catch { /* ignore parse errors */ }
+                }
+
                 var today = DateTime.Today;
 
                 // update meta to now (save regardless so next run sees current open)
@@ -118,8 +165,7 @@ namespace Todo
                                     }
                                 }
 
-                                SaveTasks();
-
+                                // Do not auto-save here; saving will happen on application exit or other explicit actions.
                                 if (_currentDate == DateTime.Today)
                                     LoadTasksForDate(DateTime.Today);
                             }
@@ -151,8 +197,8 @@ namespace Todo
                     {
                         // Move focus away to commit binding
                         textBox.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
-                    }
-                }
+                      }
+                 }
             }
         }
 
@@ -414,12 +460,12 @@ namespace Todo
                     TaskList.Remove(tm);
                 }
 
-                // update current date storage
+                // update current date storage in memory only (don't persist to disk here)
                 var key = DateKey(_currentDate);
                 AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
                     .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
                     .ToList();
-                SaveTasks(); // Save immediately after any change for today
+                // Removed immediate SaveTasks();
             }
             _placeholderJustFocused = false;
             UpdateTitle();
@@ -467,8 +513,7 @@ namespace Todo
                 e.Handled = true;
             }
 
-            // Save after key up for today
-            SaveTasks();
+            // Removed immediate SaveTasks();
         }
 
         private void TaskTextBox_LostFocus(object sender, RoutedEventArgs e)
@@ -495,12 +540,12 @@ namespace Todo
                     if (sv != null)
                     {
                         sv.ScrollToHorizontalOffset(0);
-                    }
-                }
+                      }
+                  }
             }
             catch { }
 
-            // Save after lost focus for today
+            // Save after lost focus for today (persist changes)
             SaveTasks();
         }
 
@@ -821,6 +866,9 @@ namespace Todo
                     task.People = new List<string>(dialog.TaskPeople);
                     task.Meetings = new List<string>(dialog.TaskMeetings);
 
+                    // ensure link is updated from dialog
+                    task.LinkPath = dialog.LinkPath;
+
                     // handle future scheduling on UI model
                     task.IsFuture = dialog.IsFuture;
                     task.FutureDate = dialog.FutureDate;
@@ -867,6 +915,8 @@ namespace Todo
                                 list[i].Description = task.Description;
                                 list[i].People = new List<string>(task.People ?? new List<string>());
                                 list[i].Meetings = new List<string>(task.Meetings ?? new List<string>());
+                                // ensure link path is persisted
+                                list[i].LinkPath = task.LinkPath;
                                 list[i].IsFuture = task.IsFuture;
                                 list[i].FutureDate = task.FutureDate;
                                 list[i].IsComplete = task.IsComplete;
@@ -932,7 +982,8 @@ namespace Todo
                         }
                     }
 
-                    SaveTasks(); // Save after editing a task
+                    // Save after editing a task (dialog closed)
+                    SaveTasks();
                 }
             }
         }
@@ -1107,6 +1158,172 @@ namespace Todo
                         }
                     }
                 }
+            }
+            catch { }
+        }
+
+        private void OpenLinkButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (sender is Button btn && btn.DataContext is TaskModel tm)
+                {
+                    var path = tm?.LinkPath;
+                    if (string.IsNullOrWhiteSpace(path)) return;
+
+                    try
+                    {
+                        // For folders and files, UseShellExecute=true will open with default handler
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = path,
+                            UseShellExecute = true
+                        });
+                    }
+                    catch
+                    {
+                        // If Process.Start fails for some reason, try URL handling
+                        try
+                        {
+                            if (Uri.TryCreate(path, UriKind.Absolute, out var u))
+                            {
+                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = u.ToString(),
+                                    UseShellExecute = true
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void BackupNowButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+                var backupName = $"{timestamp}_tasks_backup.json";
+                if (File.Exists(SaveFileName))
+                {
+                    File.Copy(SaveFileName, backupName, overwrite: true);
+                }
+                else
+                {
+                    // serialize current in-memory tasks to the backup file
+                    var sanitized = new Dictionary<string, List<TaskModel>>();
+                    foreach (var kv in AllTasks)
+                         sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
+                    var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(backupName, json);
+                }
+                MessageBox.Show($"Backup saved: {backupName}", "Backup", MessageBoxButton.OK, MessageBoxImage.Information);
+                UpdateLastBackupText(DateTime.Now);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Backup failed: {ex.Message}", "Backup", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // Creates an automatic backup in the 'autobackups' folder and trims to the most recent AutoBackupKeep files.
+        private void AutoBackupNow()
+        {
+            try
+            {
+                var folder = AutoBackupFolder;
+                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+
+                var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+                var backupName = $"{timestamp}_tasks_backup.json";
+                var backupPath = System.IO.Path.Combine(folder, backupName);
+
+                if (File.Exists(SaveFileName))
+                {
+                    File.Copy(SaveFileName, backupPath, overwrite: true);
+                }
+                else
+                {
+                    var sanitized = new Dictionary<string, List<TaskModel>>();
+                    foreach (var kv in AllTasks)
+                         sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
+                    var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(backupPath, json);
+                }
+
+                // Update UI with last backup time
+                try { UpdateLastBackupText(DateTime.Now); } catch { }
+
+                // Trim old backups leaving the most recent AutoBackupKeep files
+                try
+                {
+                    var files = Directory.GetFiles(folder, "*_tasks_backup.json")
+                        .OrderByDescending(f => System.IO.Path.GetFileName(f))
+                        .ToList();
+                    foreach (var f in files.Skip(AutoBackupKeep))
+                    {
+                        try { File.Delete(f); } catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log trimming errors but don't interrupt auto-backup
+                    try { File.AppendAllText("tasks_debug_log.txt", $"[{DateTime.Now}] AutoBackup trim error: {ex.Message}\n"); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log errors silently for automatic backups
+                try { File.AppendAllText("tasks_debug_log.txt", $"[{DateTime.Now}] AutoBackup error: {ex.Message}\n"); } catch { }
+            }
+        }
+
+        // Find the latest backup timestamp from autobackups folder or root backups
+        private DateTime? FindLatestBackupTimestamp()
+        {
+            try
+            {
+                var candidates = new List<DateTime>();
+
+                // check autobackups
+                if (Directory.Exists(AutoBackupFolder))
+                {
+                    foreach (var f in Directory.GetFiles(AutoBackupFolder, "*_tasks_backup.json"))
+                    {
+                        var name = System.IO.Path.GetFileNameWithoutExtension(f);
+                        var parts = name.Split(new[] {"_tasks_backup"}, StringSplitOptions.None);
+                        if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                            candidates.Add(dt);
+                    }
+                }
+
+                // check root backups
+                foreach (var f in Directory.GetFiles(".", "*_tasks_backup.json"))
+                {
+                    var name = System.IO.Path.GetFileNameWithoutExtension(f);
+                    var parts = name.Split(new[] {"_tasks_backup"}, StringSplitOptions.None);
+                    if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                        candidates.Add(dt);
+                }
+
+                if (candidates.Count == 0) return null;
+                return candidates.Max();
+            }
+            catch { return null; }
+        }
+
+        private void UpdateLastBackupText(DateTime? dt)
+        {
+            try
+            {
+                if (LastBackupTextBlock == null) return;
+                if (dt.HasValue)
+                    LastBackupTextBlock.Text = $"Last backup: {dt.Value.ToString("yyyy-MM-dd HH:mm:ss")}";
+                else
+                    LastBackupTextBlock.Text = "Last backup: --";
             }
             catch { }
         }

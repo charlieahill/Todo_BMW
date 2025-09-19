@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
 
 namespace Todo
 {
@@ -165,13 +166,37 @@ namespace Todo
                 if (_linkPath == value) return;
                 _linkPath = value ?? string.Empty;
                 OnPropertyChanged(nameof(LinkPath));
-                // update HasLink
+                // update HasLink and link-type properties
                 OnPropertyChanged(nameof(HasLink));
+                OnPropertyChanged(nameof(IsLinkFile));
+                OnPropertyChanged(nameof(IsLinkFolder));
+                OnPropertyChanged(nameof(IsLinkWeb));
             }
         }
 
         // Convenience property used by UI to show an icon when a link exists
         public bool HasLink => !string.IsNullOrWhiteSpace(LinkPath);
+
+        // New computed properties for icon selection
+        public bool IsLinkFolder => !string.IsNullOrWhiteSpace(LinkPath) && Directory.Exists(LinkPath);
+        public bool IsLinkFile => !string.IsNullOrWhiteSpace(LinkPath) && File.Exists(LinkPath);
+        public bool IsLinkWeb
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(LinkPath)) return false;
+                try
+                {
+                    if (Uri.TryCreate(LinkPath, UriKind.Absolute, out var u))
+                    {
+                        var s = u.Scheme?.ToLowerInvariant();
+                        return s == "http" || s == "https";
+                    }
+                }
+                catch { }
+                return false;
+            }
+        }
 
         public override string ToString()
         {
