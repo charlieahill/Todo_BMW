@@ -16,6 +16,7 @@ namespace Todo
         public ObservableCollection<string> TaskMeetings { get; set; } = new ObservableCollection<string>();
         public ObservableCollection<string> PeopleSuggestions { get; set; } = new ObservableCollection<string>();
         public ObservableCollection<string> MeetingSuggestions { get; set; } = new ObservableCollection<string>();
+        public string LinkPath { get; set; }
 
         private bool _isFuture;
         public bool IsFuture
@@ -66,6 +67,10 @@ namespace Todo
             MeetingsBox.KeyDown += MeetingsBox_KeyDown;
             PeopleList.MouseDoubleClick += PeopleList_MouseDoubleClick;
             MeetingsList.MouseDoubleClick += MeetingsList_MouseDoubleClick;
+
+            // initialize link
+            LinkBox.Text = model.LinkPath ?? string.Empty;
+            LinkPath = model.LinkPath ?? string.Empty;
         }
 
         private void PeopleBox_KeyDown(object sender, KeyEventArgs e)
@@ -128,6 +133,8 @@ namespace Todo
         {
             TaskTitle = TitleBox.Text;
             TaskDescription = DescriptionBox.Text;
+            // capture link
+            LinkPath = LinkBox.Text;
             // ensure Future properties are updated from UI bindings
             DialogResult = true;
             Close();
@@ -147,6 +154,37 @@ namespace Todo
         private void AddMeetingButton_Click(object sender, RoutedEventArgs e)
         {
             AddMeetingFromInput();
+        }
+
+        private void BrowseLinkButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog();
+                if (dlg.ShowDialog(this) == true)
+                {
+                    LinkBox.Text = dlg.FileName;
+                    LinkPath = dlg.FileName;
+                }
+            }
+            catch { }
+        }
+
+        private void BrowseFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                using (var fbd = new System.Windows.Forms.FolderBrowserDialog())
+                {
+                    var res = fbd.ShowDialog();
+                    if (res == System.Windows.Forms.DialogResult.OK)
+                    {
+                        LinkBox.Text = fbd.SelectedPath;
+                        LinkPath = fbd.SelectedPath;
+                    }
+                }
+            }
+            catch { }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

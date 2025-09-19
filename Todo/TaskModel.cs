@@ -156,6 +156,23 @@ namespace Todo
             }
         }
 
+        private string _linkPath = string.Empty;
+        public string LinkPath
+        {
+            get => _linkPath;
+            set
+            {
+                if (_linkPath == value) return;
+                _linkPath = value ?? string.Empty;
+                OnPropertyChanged(nameof(LinkPath));
+                // update HasLink
+                OnPropertyChanged(nameof(HasLink));
+            }
+        }
+
+        // Convenience property used by UI to show an icon when a link exists
+        public bool HasLink => !string.IsNullOrWhiteSpace(LinkPath);
+
         public override string ToString()
         {
             string completeAsString = "Complete";
@@ -171,7 +188,7 @@ namespace Todo
 
         }
 
-        public TaskModel(string taskname, bool iscomplete = false, bool isPlaceholder = false, string description = "", List<string> people = null, List<string> meetings = null, bool isFuture = false, DateTime? futureDate = null, Guid? id = null)
+        public TaskModel(string taskname, bool iscomplete = false, bool isPlaceholder = false, string description = "", List<string> people = null, List<string> meetings = null, bool isFuture = false, DateTime? futureDate = null, string linkPath = null, Guid? id = null)
         {
             Id = id ?? Guid.NewGuid();
             TaskName = taskname;
@@ -182,6 +199,7 @@ namespace Todo
             Meetings = meetings ?? new List<string>();
             IsFuture = isFuture;
             FutureDate = futureDate;
+            LinkPath = linkPath ?? string.Empty;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

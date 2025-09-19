@@ -53,6 +53,7 @@ namespace Todo
             HandleCarryOverIfNewDay();
 
             lbTasksList.ItemsSource = TaskList;
+            lbTasksList.MouseDoubleClick += LbTasksList_MouseDoubleClick;
 
             Application.Current.Exit += Current_Exit;
 
@@ -104,14 +105,14 @@ namespace Todo
                                     else if (item.IsCopyFuture && item.FutureDate.HasValue)
                                     {
                                         var newKey = DateKey(item.FutureDate.Value.Date);
-                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, Guid.NewGuid());
+                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, t.LinkPath, Guid.NewGuid());
                                         if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
                                         AllTasks[newKey].Add(copy);
                                     }
                                     else // Copy to today (default)
                                     {
                                         var todayKey = DateKey(today);
-                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, Guid.NewGuid());
+                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, t.LinkPath, Guid.NewGuid());
                                         if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
                                         AllTasks[todayKey].Add(copy);
                                     }
@@ -299,7 +300,7 @@ namespace Todo
                 foreach (var t in AllTasks[key])
                 {
                     // Deep copy all properties, including id and future scheduling
-                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id);
+                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
                     model.IsReadOnly = dt != DateTime.Today;
                     TaskList.Add(model);
                 }
@@ -416,7 +417,7 @@ namespace Todo
                 // update current date storage
                 var key = DateKey(_currentDate);
                 AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
-                    .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate))
+                    .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
                     .ToList();
                 SaveTasks(); // Save immediately after any change for today
             }
@@ -485,6 +486,20 @@ namespace Todo
                     }
                 }
             }
+            // Reset horizontal scroll so the start of the line is visible when losing focus
+            try
+            {
+                if (sender is TextBox tb2)
+                {
+                    var sv = FindVisualChild<ScrollViewer>(tb2);
+                    if (sv != null)
+                    {
+                        sv.ScrollToHorizontalOffset(0);
+                    }
+                }
+            }
+            catch { }
+
             // Save after lost focus for today
             SaveTasks();
         }
@@ -772,7 +787,7 @@ namespace Todo
             if (_currentDate == null) return;
             var key = DateKey(_currentDate);
             var realTasks = TaskList.Where(t => !t.IsPlaceholder)
-                .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id))
+                .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
                 .ToList();
 
             if (realTasks.Count > 0)
@@ -874,7 +889,7 @@ namespace Todo
                     // 3) If we didn't update in place, add to the target bucket (preserve existing relative ordering not possible here)
                     if (!updatedInPlace)
                     {
-                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People ?? new List<string>()), new List<string>(task.Meetings ?? new List<string>()), task.IsFuture, task.FutureDate, task.Id);
+                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People ?? new List<string>()), new List<string>(task.Meetings ?? new List<string>()), task.IsFuture, task.FutureDate, task.LinkPath, task.Id);
                         if (!AllTasks.ContainsKey(targetKey)) AllTasks[targetKey] = new List<TaskModel>();
 
                         // If there was an original stored entry we removed above, try to insert at its original index
@@ -959,7 +974,7 @@ namespace Todo
 
             foreach (var t in unique)
             {
-                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
             }
         }
 
@@ -1009,7 +1024,7 @@ namespace Todo
             var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
             foreach (var t in unique)
             {
-                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
             }
         }
 
@@ -1023,7 +1038,7 @@ namespace Todo
             var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
             foreach (var t in unique)
             {
-                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id));
+                TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
             }
         }
 
@@ -1045,7 +1060,7 @@ namespace Todo
             foreach (var e in unique)
             {
                 var t = e.Task;
-                var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.Id);
+                var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
                 // Set the date this task was stored under
                 if (DateTime.TryParseExact(e.DateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
                 {
@@ -1060,6 +1075,40 @@ namespace Todo
 
                 TaskList.Add(model);
             }
+        }
+
+        private void LbTasksList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (lbTasksList.SelectedItem is TaskModel tm)
+                {
+                    if (!string.IsNullOrWhiteSpace(tm.LinkPath))
+                    {
+                        var path = tm.LinkPath;
+                        if (Directory.Exists(path))
+                        {
+                            // open folder
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = path,
+                                UseShellExecute = true,
+                                Verb = "open"
+                            });
+                        }
+                        else if (File.Exists(path))
+                        {
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = path,
+                                UseShellExecute = true,
+                                Verb = "open"
+                            });
+                        }
+                    }
+                }
+            }
+            catch { }
         }
     }
 }
