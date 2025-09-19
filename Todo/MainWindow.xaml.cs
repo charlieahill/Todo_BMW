@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -436,6 +437,56 @@ namespace Todo
             }
         }
 
+        // Handle paste via keyboard or context menu by clearing placeholder before the paste occurs
+        private void TaskTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            try
+            {
+                if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder)
+                {
+                    bool isPasteKey = (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V) || (Keyboard.Modifiers == ModifierKeys.Shift && e.Key == Key.Insert);
+                    if (isPasteKey)
+                    {
+                        _suppressTextChanged = true;
+                        tm.IsPlaceholder = false;
+                        tm.TaskName = string.Empty;
+                        tb.Text = string.Empty;
+                        _suppressTextChanged = false;
+                        // allow paste to proceed
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void TaskTextBox_Loaded(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (sender is TextBox tb)
+                {
+                    DataObject.AddPastingHandler(tb, new DataObjectPastingEventHandler(TaskTextBox_OnPasting));
+                }
+            }
+            catch { }
+        }
+
+        private void TaskTextBox_OnPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            try
+            {
+                if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder)
+                {
+                    _suppressTextChanged = true;
+                    tm.IsPlaceholder = false;
+                    tm.TaskName = string.Empty;
+                    tb.Text = string.Empty;
+                    _suppressTextChanged = false;
+                }
+            }
+            catch { }
+        }
+
         private void TaskTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (_suppressTextChanged) return;
@@ -717,14 +768,28 @@ namespace Todo
         private ViewMode _mode = ViewMode.Today;
         private string _activeFilter = null;
 
+        private void ExitAllMode()
+        {
+            DateControlsGrid.Visibility = Visibility.Visible;
+            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+            _mode = ViewMode.Today;
+            // hide people/meetings filter containers when exiting special modes
+            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
+            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+            SetCurrentDate(_currentDate);
+        }
+
         private void TodayButton_Click(object sender, RoutedEventArgs e)
         {
             // Exit any special filter mode and return to today's view
             // restore date controls
             DateControlsGrid.Visibility = Visibility.Visible;
-            // hide people/meetings filter comboboxes
+            // hide people/meetings filter comboboxes and containers
             if (PeopleFilterComboBox != null) PeopleFilterComboBox.Visibility = Visibility.Collapsed;
             if (MeetingsFilterComboBox != null) MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
+            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
+            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
             // hide search UI
             if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
@@ -739,43 +804,43 @@ namespace Todo
         private void PeopleButton_Click(object sender, RoutedEventArgs e)
         {
             _mode = ViewMode.People;
-            // hide date controls and show people combobox
+            // hide date controls and show people combobox container
             DateControlsGrid.Visibility = Visibility.Collapsed;
-            PeopleFilterComboBox.Visibility = Visibility.Visible;
-            // hide search box if visible
-            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-            MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
-            // populate people combobox
-            var people = AllTasks.Values.SelectMany(l => l.SelectMany(t => t.People)).Distinct().OrderBy(s => s).ToList();
-            people.Insert(0, ""); // blank = any
-            PeopleFilterComboBox.ItemsSource = people;
-            PeopleFilterComboBox.SelectedIndex = 0;
-            // show all tasks that have any people
-            // ApplyPeopleFilter may be implemented elsewhere; if not, fallback to ApplyFilter
-            try { ApplyPeopleFilter(null); } catch { ApplyFilter(); }
-            UpdateTitle();
-        }
+            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Visible;
+            // ensure inner controls are visible (child ComboBox may have been collapsed earlier)
+            if (PeopleFilterComboBox != null) PeopleFilterComboBox.Visibility = Visibility.Visible;
+            if (PeopleShowAllToggle != null) { /* keep previous state; do not modify */ }
+             // hide search box if visible
+             if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+             // hide the meetings container when in people mode
+             if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+             // populate people combobox according to toggle (default: only active people)
+             PopulatePeopleComboBox();
+             // show tasks
+             try { ApplyPeopleFilter(null); } catch { ApplyFilter(); }
+             UpdateTitle();
+         }
 
-        private void MeetingButton_Click(object sender, RoutedEventArgs e)
-        {
-            _mode = ViewMode.Meetings;
-            // hide date controls and show meetings combobox
-            DateControlsGrid.Visibility = Visibility.Collapsed;
-            MeetingsFilterComboBox.Visibility = Visibility.Visible;
-            // hide search box if visible
-            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-            PeopleFilterComboBox.Visibility = Visibility.Collapsed;
-            // populate meetings combobox
-            var meetings = AllTasks.Values.SelectMany(l => l.SelectMany(t => t.Meetings)).Distinct().OrderBy(s => s).ToList();
-            meetings.Insert(0, ""); // blank = any
-            MeetingsFilterComboBox.ItemsSource = meetings;
-            MeetingsFilterComboBox.SelectedIndex = 0;
-            // show all tasks that have any meetings
-            try { ApplyMeetingsFilter(null); } catch { ApplyFilter(); }
-            UpdateTitle();
-        }
+         private void MeetingButton_Click(object sender, RoutedEventArgs e)
+         {
+             _mode = ViewMode.Meetings;
+             // hide date controls and show meetings combobox
+             DateControlsGrid.Visibility = Visibility.Collapsed;
+             if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Visible;
+             // ensure inner controls are visible
+             if (MeetingsFilterComboBox != null) MeetingsFilterComboBox.Visibility = Visibility.Visible;
+             if (MeetingsShowAllToggle != null) { /* keep previous state; do not modify */ }
+             // hide search box if visible
+             if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+             // hide the people container when in meetings mode
+             if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
+             // populate meetings combobox according to toggle (default: only active meetings)
+             PopulateMeetingsComboBox();
+             try { ApplyMeetingsFilter(null); } catch { ApplyFilter(); }
+             UpdateTitle();
+         }
 
         private void AllButton_Click(object sender, RoutedEventArgs e)
         {
@@ -783,10 +848,10 @@ namespace Todo
             FilterPopup.IsOpen = false;
             CalendarPopup.IsOpen = false;
 
-            // Show search box and hide date controls
+            // Show search box and hide date/filters
             DateControlsGrid.Visibility = Visibility.Collapsed;
-            PeopleFilterComboBox.Visibility = Visibility.Collapsed;
-            MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
+            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
+            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Visible;
             if (SearchTextBox != null)
             {
@@ -798,15 +863,6 @@ namespace Todo
             // Load all tasks
             try { ApplyAllFilter(SearchTextBox?.Text); } catch { ApplyFilter(); }
             UpdateTitle();
-        }
-
-        private void ExitAllMode()
-        {
-            DateControlsGrid.Visibility = Visibility.Visible;
-            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-            _mode = ViewMode.Today;
-            SetCurrentDate(_currentDate);
         }
 
         // Helper to find child of type T in visual tree
@@ -1068,11 +1124,18 @@ namespace Todo
         private void ApplyPeopleFilter(string person)
         {
             TaskList.Clear();
-            var tasks = AllTasks.Values.SelectMany(list => list).Where(t => t.People != null && t.People.Count > 0);
+            // Include date key so we can filter out old completed items when appropriate
+            var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+            var tasks = entries.Where(e => e.Task.People != null && e.Task.People.Count > 0).Select(e => new { e.Task, e.DateKey });
             if (!string.IsNullOrEmpty(person))
-                tasks = tasks.Where(t => t.People.Contains(person));
+                tasks = tasks.Where(e => e.Task.People.Contains(person));
 
-            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
+            bool showAll = PeopleShowAllToggle?.IsChecked == true;
+            // Exclude tasks that are completed and dated yesterday or before unless 'show all' is set
+            if (!showAll)
+                tasks = tasks.Where(e => !IsOldCompleted(e.Task, e.DateKey));
+
+            var unique = tasks.GroupBy(e => e.Task.Id).Select(g => g.First().Task).ToList();
             foreach (var t in unique)
             {
                 TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
@@ -1082,11 +1145,17 @@ namespace Todo
         private void ApplyMeetingsFilter(string meeting)
         {
             TaskList.Clear();
-            var tasks = AllTasks.Values.SelectMany(list => list).Where(t => t.Meetings != null && t.Meetings.Count > 0);
+            var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+            var tasks = entries.Where(e => e.Task.Meetings != null && e.Task.Meetings.Count > 0).Select(e => new { e.Task, e.DateKey });
             if (!string.IsNullOrEmpty(meeting))
-                tasks = tasks.Where(t => t.Meetings.Contains(meeting));
+                tasks = tasks.Where(e => e.Task.Meetings.Contains(meeting));
 
-            var unique = tasks.GroupBy(t => t.Id).Select(g => g.First()).ToList();
+            bool showAll = MeetingsShowAllToggle?.IsChecked == true;
+            // Exclude tasks that are completed and dated yesterday or before unless 'show all' is set
+            if (!showAll)
+                tasks = tasks.Where(e => !IsOldCompleted(e.Task, e.DateKey));
+
+            var unique = tasks.GroupBy(e => e.Task.Id).Select(g => g.First().Task).ToList();
             foreach (var t in unique)
             {
                 TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
@@ -1326,6 +1395,106 @@ namespace Todo
                     LastBackupTextBlock.Text = "Last backup: --";
             }
             catch { }
+        }
+
+        // Helper to determine whether a task is completed and belongs to yesterday or an earlier date
+        private bool IsOldCompleted(TaskModel t, string dateKey)
+        {
+            if (t == null) return false;
+            if (!t.IsComplete) return false;
+            if (string.IsNullOrEmpty(dateKey)) return false;
+            if (!DateTime.TryParseExact(dateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                return false;
+            // Completed on or before yesterday should be hidden in People/Meetings modes
+            return dt.Date <= DateTime.Today.AddDays(-1);
+        }
+
+        // Helper to populate People combobox according to toggle state
+        private void PopulatePeopleComboBox()
+        {
+            try
+            {
+                bool showAll = PeopleShowAllToggle?.IsChecked == true;
+                IEnumerable<string> people;
+                // Build entries with source date so we can exclude old completed items when not showing all
+                var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+                if (showAll)
+                {
+                    // include all tasks (don't filter out old completed when 'show all' is on)
+                    people = entries.SelectMany(e => e.Task.People ?? new List<string>()).Distinct();
+                }
+                else
+                {
+                    // only people who have active (incomplete) tasks (exclude old completed)
+                    people = entries.Where(e => e.Task.People != null && e.Task.People.Count > 0 && !IsOldCompleted(e.Task, e.DateKey) && !e.Task.IsComplete)
+                                     .SelectMany(e => e.Task.People)
+                                     .Distinct();
+                }
+                var list = people.OrderBy(s => s).ToList();
+                list.Insert(0, ""); // blank = any
+                PeopleFilterComboBox.ItemsSource = list;
+                PeopleFilterComboBox.SelectedIndex = 0;
+            }
+            catch { }
+        }
+
+        // Helper to populate Meetings combobox according to toggle state
+        private void PopulateMeetingsComboBox()
+        {
+            try
+            {
+                bool showAll = MeetingsShowAllToggle?.IsChecked == true;
+                IEnumerable<string> meetings;
+                var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+                if (showAll)
+                {
+                    // include all tasks (don't filter out old completed when 'show all' is on)
+                    meetings = entries.SelectMany(e => e.Task.Meetings ?? new List<string>()).Distinct();
+                }
+                else
+                {
+                    // only meetings that have active (incomplete) tasks
+                    meetings = entries.Where(e => e.Task.Meetings != null && e.Task.Meetings.Count > 0 && !IsOldCompleted(e.Task, e.DateKey) && !e.Task.IsComplete)
+                                       .SelectMany(e => e.Task.Meetings)
+                                       .Distinct();
+                }
+                var list = meetings.OrderBy(s => s).ToList();
+                list.Insert(0, "");
+                MeetingsFilterComboBox.ItemsSource = list;
+                MeetingsFilterComboBox.SelectedIndex = 0;
+            }
+            catch { }
+        }
+
+        // Toggle handlers for People
+        private void PeopleShowAllToggle_Checked(object sender, RoutedEventArgs e)
+        {
+            PopulatePeopleComboBox();
+            // Re-apply current selection (blank = all)
+            if (PeopleFilterComboBox != null)
+                ApplyPeopleFilter(PeopleFilterComboBox.SelectedItem as string);
+        }
+
+        private void PeopleShowAllToggle_Unchecked(object sender, RoutedEventArgs e)
+        {
+            PopulatePeopleComboBox();
+            if (PeopleFilterComboBox != null)
+                ApplyPeopleFilter(PeopleFilterComboBox.SelectedItem as string);
+        }
+
+        // Toggle handlers for Meetings
+        private void MeetingsShowAllToggle_Checked(object sender, RoutedEventArgs e)
+        {
+            PopulateMeetingsComboBox();
+            if (MeetingsFilterComboBox != null)
+                ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string);
+        }
+
+        private void MeetingsShowAllToggle_Unchecked(object sender, RoutedEventArgs e)
+        {
+            PopulateMeetingsComboBox();
+            if (MeetingsFilterComboBox != null)
+                ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string);
         }
     }
 }
