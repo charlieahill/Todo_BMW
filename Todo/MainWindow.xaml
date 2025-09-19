@@ -651,6 +651,17 @@
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,8">
             <TextBlock x:Name="LastBackupTextBlock" Text="Last backup: --" VerticalAlignment="Center" Foreground="Gray" Margin="0,0,8,0"/>
             <Button Name="BackupNowButton" Click="BackupNowButton_Click" ToolTip="Create immediate backup of tasks" Padding="8,4">Backup now</Button>
+            <!-- Time tracking button added to the right of Backup now -->
+            <Button Name="TimeTrackingButton" Click="TimeTrackingButton_Click" ToolTip="Open time tracking" Padding="8,4" Margin="8,0,0,0">
+                <Viewbox Width="16" Height="16" VerticalAlignment="Center">
+                    <Canvas Width="24" Height="24">
+                        <!-- Clock icon -->
+                        <Ellipse Stroke="Black" StrokeThickness="1.2" Fill="Transparent" Width="16" Height="16" Canvas.Left="4" Canvas.Top="4"/>
+                        <Line X1="12" Y1="8" X2="12" Y2="12" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        <Line X1="12" Y1="12" X2="15" Y2="14" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Canvas>
+                </Viewbox>
+            </Button>
         </StackPanel>
     </Grid>
 </Window>

@@ -18,6 +18,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using System.Windows; // ensure MessageBox
 
 namespace Todo
 {
@@ -87,6 +88,9 @@ namespace Todo
             catch { UpdateLastBackupText(null); }
 
             _isInitializing = false;
+
+            // Record open event
+            try { TimeTrackingService.Instance.RecordOpen(); } catch { }
         }
 
         private class MetaInfo
@@ -183,6 +187,9 @@ namespace Todo
             CommitAllTaskEdits();
             // Save tasks; SaveTasks will decide whether to persist current-date TaskList or just AllTasks
             SaveTasks();
+
+            // record close event
+            try { TimeTrackingService.Instance.RecordClose(); } catch { }
         }
 
         private void CommitAllTaskEdits()
@@ -1495,6 +1502,19 @@ namespace Todo
             PopulateMeetingsComboBox();
             if (MeetingsFilterComboBox != null)
                 ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string);
+        }
+
+        private void TimeTrackingButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new TimeTrackingDialog() { Owner = this };
+                dlg.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to open time tracking dialog: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 }
