@@ -649,7 +649,32 @@
 
         <!-- Backup now button moved to bottom-right (own bottom row) -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,8">
-            <TextBlock x:Name="LastBackupTextBlock" Text="Last backup: --" VerticalAlignment="Center" Foreground="Gray" Margin="0,0,8,0"/>
+            <!-- Split the new labels into title + data rows, center aligned -->
+            <StackPanel Orientation="Vertical" Margin="0,0,8,0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Last backup" Foreground="Gray" FontSize="11" TextAlignment="Center" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="LastBackupDataTextBlock" Text="--" Foreground="Gray" FontSize="12" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Vertical" Margin="0,0,8,0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Last saved" Foreground="Gray" FontSize="11" TextAlignment="Center" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="LastSavedDataTextBlock" Text="--" Foreground="Gray" FontSize="12" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Vertical" Margin="0,0,8,0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Prev open" Foreground="Gray" FontSize="11" TextAlignment="Center" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="LastOpenedDataTextBlock" Text="--" Foreground="Gray" FontSize="12" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Vertical" Margin="0,0,8,0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Total tasks" Foreground="Gray" FontSize="11" TextAlignment="Center" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="TotalTasksDataTextBlock" Text="0" Foreground="Gray" FontSize="12" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Vertical" Margin="0,0,12,0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="View" Foreground="Gray" FontSize="11" TextAlignment="Center" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="CurrentViewCountDataTextBlock" Text="0" Foreground="Gray" FontSize="12" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </StackPanel>
+
             <Button Name="BackupNowButton" Click="BackupNowButton_Click" ToolTip="Create immediate backup of tasks" Padding="8,4">Backup now</Button>
             <!-- Time tracking button added to the right of Backup now -->
             <Button Name="TimeTrackingButton" Click="TimeTrackingButton_Click" ToolTip="Open time tracking" Padding="8,4" Margin="8,0,0,0">

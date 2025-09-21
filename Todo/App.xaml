@@ -5,6 +5,8 @@
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <!-- Make CountToVis available application-wide to avoid XAML parse-time resolution issues -->
+        <local:CountToVisibilityConverter x:Key="CountToVis"/>
         <Style TargetType="Button">
             <Setter Property="Background" Value="White"/>
             <Setter Property="Margin" Value="3"/>

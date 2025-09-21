@@ -42,8 +42,19 @@ namespace Todo
         // Auto-backup support
         private DispatcherTimer _autoBackupTimer;
         private const string AutoBackupFolder = "autobackups";
-        private const int AutoBackupKeep = 10;
-        private readonly TimeSpan AutoBackupInterval = TimeSpan.FromMinutes(15);
+        private const int AutoBackupKeep = 20; // keep 20 most recent autobackups
+        private readonly TimeSpan AutoBackupInterval = TimeSpan.FromHours(1); // run autobackup every hour
+        private const string StartupLogFile = "startup_checks.log";
+
+        private void AppendStartupLog(string message)
+        {
+            try
+            {
+                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n";
+                File.AppendAllText(StartupLogFile, line);
+            }
+            catch { /* don't break startup for logging failures */ }
+        }
 
         public MainWindow()
         {
@@ -58,7 +69,8 @@ namespace Todo
             SetCurrentDate(_currentDate);
 
             // If application was last opened on a previous day, prompt to carry over unfinished tasks
-            HandleCarryOverIfNewDay();
+            // Moved carryover handling to Loaded event so dialog is shown reliably after window is displayed
+            this.Loaded += MainWindow_Loaded;
 
             lbTasksList.ItemsSource = TaskList;
             lbTasksList.MouseDoubleClick += LbTasksList_MouseDoubleClick;
@@ -87,10 +99,57 @@ namespace Todo
             }
             catch { UpdateLastBackupText(null); }
 
+            // Initialize last saved display (based on file timestamp if present)
+            try
+            {
+                if (File.Exists(SaveFileName))
+                    UpdateLastSavedText(File.GetLastWriteTime(SaveFileName));
+                else
+                    UpdateLastSavedText(null);
+            }
+            catch { UpdateLastSavedText(null); }
+
+            // Initialize last opened (previous run) display if meta exists
+            try
+            {
+                if (File.Exists(MetaFileName))
+                {
+                    var jm = File.ReadAllText(MetaFileName);
+                    var meta = JsonSerializer.Deserialize<MetaInfo>(jm);
+                    UpdateLastOpenedText(meta?.LastOpened);
+                }
+                else
+                {
+                    UpdateLastOpenedText(null);
+                }
+            }
+            catch { UpdateLastOpenedText(null); }
+
+            // Subscribe to TaskList changes to update view counts
+            TaskList.CollectionChanged += (s, e) => UpdateTotals();
+
             _isInitializing = false;
 
             // Record open event
             try { TimeTrackingService.Instance.RecordOpen(); } catch { }
+
+            // Update totals at startup
+            UpdateTotals();
+        }
+
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Ensure carryover dialog is invoked after the main window is shown so it appears reliably
+                Dispatcher.BeginInvoke(new Action(() => HandleCarryOverIfNewDay()), DispatcherPriority.Background);
+            }
+            catch { }
+            finally
+            {
+                // Unsubscribe to avoid re-invoking if Loaded fires again
+                this.Loaded -= MainWindow_Loaded;
+            }
         }
 
         private class MetaInfo
@@ -109,9 +168,11 @@ namespace Todo
                     meta = JsonSerializer.Deserialize<MetaInfo>(jm);
                 }
 
-                var lastOpenedDate = meta?.LastOpened?.Date;
+                var lastOpenedDate = meta?.LastOpened;
+                var previousStartString = lastOpenedDate.HasValue ? lastOpenedDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
+                var today = DateTime.Today;
 
-                // If meta is missing, attempt to infer the last-opened date from saved task keys.
+                // If meta missing, attempt to infer date from saved keys
                 if (!lastOpenedDate.HasValue)
                 {
                     try
@@ -126,59 +187,98 @@ namespace Todo
                             lastOpenedDate = candidateDates.Max();
                         }
                     }
-                    catch { /* ignore parse errors */ }
+                    catch { }
                 }
 
-                var today = DateTime.Today;
+                // Update last opened display
+                try { UpdateLastOpenedText(lastOpenedDate); } catch { }
 
-                // update meta to now (save regardless so next run sees current open)
+                // Save current open time for next run
                 var newMeta = new MetaInfo { LastOpened = DateTime.Now };
                 try { File.WriteAllText(MetaFileName, JsonSerializer.Serialize(newMeta)); } catch { }
 
-                if (lastOpenedDate.HasValue && lastOpenedDate.Value < today)
+                bool carryoverCalled = false;
+                string reason = "";
+                bool? dialogResult = null;
+
+                if (!lastOpenedDate.HasValue)
                 {
-                    var key = DateKey(lastOpenedDate.Value);
-                    if (AllTasks.ContainsKey(key))
+                    reason = "NoPreviousStartFound";
+                }
+                else if (lastOpenedDate.Value.Date >= today)
+                {
+                    reason = "PreviousStartIsSameOrLaterThanToday";
+                }
+                else
+                {
+                    var lastOpenedDateOnly = lastOpenedDate.Value.Date;
+                    var key = DateKey(lastOpenedDateOnly);
+                    if (!AllTasks.ContainsKey(key))
+                    {
+                        reason = "NoTasksForPreviousDate";
+                    }
+                    else
                     {
                         var incomplete = AllTasks[key].Where(t => !t.IsComplete).ToList();
-                        if (incomplete.Count > 0)
+                        if (incomplete.Count == 0)
                         {
-                            var dlg = new CarryOverDialog(incomplete) { Owner = this };
-                            if (dlg.ShowDialog() == true)
+                            reason = "NoIncompleteTasks";
+                        }
+                        else
+                        {
+                            // Call the dialog
+                            carryoverCalled = true;
+                            try
                             {
-                                foreach (var item in dlg.Items)
-                                {
-                                    var t = item.Task;
-                                    if (item.IsMarkCompleted)
-                                    {
-                                        var found = AllTasks[key].FirstOrDefault(x => x.Id == t.Id);
-                                        if (found != null) found.IsComplete = true;
-                                    }
-                                    else if (item.IsCopyFuture && item.FutureDate.HasValue)
-                                    {
-                                        var newKey = DateKey(item.FutureDate.Value.Date);
-                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, t.LinkPath, Guid.NewGuid());
-                                        if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
-                                        AllTasks[newKey].Add(copy);
-                                    }
-                                    else // Copy to today (default)
-                                    {
-                                        var todayKey = DateKey(today);
-                                        var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, t.LinkPath, Guid.NewGuid());
-                                        if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
-                                        AllTasks[todayKey].Add(copy);
-                                    }
-                                }
+                                var dlg = new CarryOverDialog(incomplete) { Owner = this };
+                                dialogResult = dlg.ShowDialog() == true;
+                                reason = dialogResult == true ? "DialogShownAndProcessed" : "DialogShownButCancelled";
 
-                                // Do not auto-save here; saving will happen on application exit or other explicit actions.
-                                if (_currentDate == DateTime.Today)
-                                    LoadTasksForDate(DateTime.Today);
+                                if (dialogResult == true)
+                                {
+                                    foreach (var item in dlg.Items)
+                                    {
+                                        var t = item.Task;
+                                        if (item.IsMarkCompleted)
+                                        {
+                                            var found = AllTasks[key].FirstOrDefault(x => x.Id == t.Id);
+                                            if (found != null) found.IsComplete = true;
+                                        }
+                                        else if (item.IsCopyFuture && item.FutureDate.HasValue)
+                                        {
+                                            var newKey = DateKey(item.FutureDate.Value.Date);
+                                            var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, t.LinkPath, Guid.NewGuid());
+                                            if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
+                                            AllTasks[newKey].Add(copy);
+                                        }
+                                        else
+                                        {
+                                            var todayKey = DateKey(today);
+                                            var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, t.LinkPath, Guid.NewGuid());
+                                            if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
+                                            AllTasks[todayKey].Add(copy);
+                                        }
+                                    }
+
+                                    if (_currentDate == DateTime.Today)
+                                        LoadTasksForDate(DateTime.Today);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                reason = "DialogError:" + ex.Message.Replace('\n', ' ').Replace('\r', ' ');
                             }
                         }
                     }
                 }
+
+                // Single consolidated log entry for this startup/carryover check
+                AppendStartupLog($"StartupAttempt: AttemptTime={DateTime.Now:yyyy-MM-dd HH:mm:ss}, PreviousStart={previousStartString}, CarryoverCalled={carryoverCalled}, Result={reason}{(dialogResult.HasValue ? ", DialogResult=" + dialogResult.Value.ToString() : "")} ");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppendStartupLog($"StartupCheckError: {ex.Message}");
+            }
         }
 
         private void Current_Exit(object sender, ExitEventArgs e)
@@ -234,6 +334,9 @@ namespace Todo
             {
                 MessageBox.Show($"Failed to load tasks: {ex.Message}", "Error");
             }
+
+            // Update totals after loading tasks
+            UpdateTotals();
         }
 
         private void LogLoadedTasks(Dictionary<string, List<TaskModel>> items)
@@ -280,6 +383,11 @@ namespace Todo
 
                 var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SaveFileName, json);
+
+                // Update last saved display
+                try { UpdateLastSavedText(DateTime.Now); } catch { }
+                // Also update totals in case saving removed/added items
+                try { UpdateTotals(); } catch { }
             }
             catch (Exception ex)
             {
@@ -363,6 +471,9 @@ namespace Todo
             {
                 EnsureHasPlaceholder();
             }
+
+            // Update totals whenever the view changes
+            UpdateTotals();
         }
 
         private void EnsureHasPlaceholder()
@@ -527,6 +638,7 @@ namespace Todo
             }
             _placeholderJustFocused = false;
             UpdateTitle();
+            UpdateTotals();
         }
 
         private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
@@ -1090,6 +1202,8 @@ namespace Todo
             {
                 TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
             }
+
+            UpdateTotals();
         }
 
         // People combobox selection handler
@@ -1147,6 +1261,8 @@ namespace Todo
             {
                 TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
             }
+
+            UpdateTotals();
         }
 
         private void ApplyMeetingsFilter(string meeting)
@@ -1167,6 +1283,8 @@ namespace Todo
             {
                 TaskList.Add(new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id));
             }
+
+            UpdateTotals();
         }
 
         private void ApplyAllFilter(string term)
@@ -1202,6 +1320,8 @@ namespace Todo
 
                 TaskList.Add(model);
             }
+
+            UpdateTotals();
         }
 
         private void LbTasksList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -1298,6 +1418,9 @@ namespace Todo
                 }
                 MessageBox.Show($"Backup saved: {backupName}", "Backup", MessageBoxButton.OK, MessageBoxImage.Information);
                 UpdateLastBackupText(DateTime.Now);
+
+                // update totals as well
+                UpdateTotals();
             }
             catch (Exception ex)
             {
@@ -1395,11 +1518,51 @@ namespace Todo
         {
             try
             {
-                if (LastBackupTextBlock == null) return;
-                if (dt.HasValue)
-                    LastBackupTextBlock.Text = $"Last backup: {dt.Value.ToString("yyyy-MM-dd HH:mm:ss")}";
-                else
-                    LastBackupTextBlock.Text = "Last backup: --";
+                var tb = this.FindName("LastBackupDataTextBlock") as TextBlock;
+                if (tb == null) return;
+                tb.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
+            }
+            catch { }
+        }
+
+        // New: update last saved label
+        private void UpdateLastSavedText(DateTime? dt)
+        {
+            try
+            {
+                var tb = this.FindName("LastSavedDataTextBlock") as TextBlock;
+                if (tb == null) return;
+                tb.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
+            }
+            catch { }
+        }
+
+        // New: update previous open label
+        private void UpdateLastOpenedText(DateTime? dt)
+        {
+            try
+            {
+                var tb = this.FindName("LastOpenedDataTextBlock") as TextBlock;
+                if (tb == null) return;
+                tb.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
+            }
+            catch { }
+        }
+
+        // New: update totals labels
+        private void UpdateTotals()
+        {
+            try
+            {
+                var totalTb = this.FindName("TotalTasksDataTextBlock") as TextBlock;
+                var viewTb = this.FindName("CurrentViewCountDataTextBlock") as TextBlock;
+                if (totalTb == null || viewTb == null) return;
+                int total = 0;
+                try { total = AllTasks.Values.SelectMany(list => list).Count(t => t != null && !t.IsPlaceholder); } catch { total = 0; }
+                int current = 0;
+                try { current = TaskList.Count(t => t != null && !t.IsPlaceholder); } catch { current = 0; }
+                totalTb.Text = total.ToString();
+                viewTb.Text = current.ToString();
             }
             catch { }
         }
