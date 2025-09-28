@@ -1,9 +1,13 @@
 <Window x:Class="Todo.TimeTemplateDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Template" Height="360" Width="420" WindowStartupLocation="CenterOwner">
+        Title="Template" Height="520" Width="520" WindowStartupLocation="CenterOwner"
+        Background="White" Foreground="Black">
     <Grid Margin="10">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -13,28 +17,79 @@
         <StackPanel Orientation="Horizontal">
             <TextBlock Text="Start:" VerticalAlignment="Center" Margin="0,0,6,0"/>
             <DatePicker x:Name="StartDatePicker"/>
+            <CheckBox x:Name="OngoingCheck" Content="Ongoing" Margin="12,0,0,0" VerticalAlignment="Center" />
             <TextBlock Text="End:" VerticalAlignment="Center" Margin="12,0,6,0"/>
             <DatePicker x:Name="EndDatePicker"/>
+            <Button Content="Apply" Margin="12,0,0,0" Click="Apply_Click" />
         </StackPanel>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0">
-            <TextBlock Text="Job:" VerticalAlignment="Center" Margin="0,0,6,0" Width="40"/>
-            <TextBox x:Name="JobText" Width="300"/>
+            <TextBlock Text="Template Name:" VerticalAlignment="Center" Margin="0,0,6,0" Width="110"/>
+            <TextBox x:Name="TemplateNameText" Width="360"/>
         </StackPanel>
 
-        <GroupBox Header="Hours per weekday (Mon..Sun)" Grid.Row="2" Margin="0,8,0,0">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+            <TextBlock Text="Employment Position:" VerticalAlignment="Center" Margin="0,0,6,0" Width="140"/>
+            <TextBox x:Name="EmploymentPositionText" Width="330"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
+            <TextBlock Text="Employment Location:" VerticalAlignment="Center" Margin="0,0,6,0" Width="140"/>
+            <TextBox x:Name="EmploymentLocationText" Width="330"/>
+        </StackPanel>
+
+        <!-- New row for standard start/lunch/end -->
+        <GroupBox Header="Standard Times" Grid.Row="4" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal" Margin="8">
+                <StackPanel Margin="0,0,12,0">
+                    <TextBlock Text="Standard Start (HH:MM)" />
+                    <TextBox x:Name="StandardStartBox" Width="120" TextChanged="StandardTimes_TextChanged" />
+                </StackPanel>
+                <StackPanel Margin="0,0,12,0">
+                    <TextBlock Text="Lunch break (HH:MM)" />
+                    <TextBox x:Name="LunchBreakBox" Width="120" TextChanged="StandardTimes_TextChanged" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Standard End (HH:MM)" />
+                    <TextBox x:Name="StandardEndBox" Width="120" TextChanged="StandardTimes_TextChanged" />
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Hours per weekday (Mon..Sun)" Grid.Row="5" Margin="0,8,0,0">
             <UniformGrid Columns="7">
-                <TextBox x:Name="Mon"/>
-                <TextBox x:Name="Tue"/>
-                <TextBox x:Name="Wed"/>
-                <TextBox x:Name="Thu"/>
-                <TextBox x:Name="Fri"/>
-                <TextBox x:Name="Sat"/>
-                <TextBox x:Name="Sun"/>
+                <StackPanel>
+                    <TextBlock Text="Mon" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Mon" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Tue" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Tue" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Wed" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Wed" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Thu" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Thu" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Fri" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Fri" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Sat" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Sat" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="Sun" FontSize="10" HorizontalAlignment="Center"/>
+                    <TextBox x:Name="Sun" Width="48" HorizontalAlignment="Center" />
+                </StackPanel>
             </UniformGrid>
         </GroupBox>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button Content="OK" Width="80" Click="Ok_Click" Margin="0,0,8,0"/>
             <Button Content="Cancel" Width="80" Click="Cancel_Click"/>
         </StackPanel>

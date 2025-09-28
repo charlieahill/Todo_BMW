@@ -22,12 +22,12 @@
                                 <TextBlock Text="{Binding Task.TaskName}" FontWeight="Bold" TextWrapping="Wrap"/>
                                 <TextBlock Text="{Binding Task.Description}" Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,6" Visibility="{Binding Task.Description, Converter={StaticResource BoolToVis}}"/>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <RadioButton Content="Copy to today" GroupName="action_{Binding Task.Id}" IsChecked="{Binding IsCopyToday, Mode=TwoWay}" Margin="0,0,12,0" />
+                                    <RadioButton Content="Copy to today" GroupName="{Binding Task.Id}" IsChecked="{Binding IsCopyToday, Mode=TwoWay}" Margin="0,0,12,0" />
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                        <RadioButton Content="Copy to future" GroupName="action_{Binding Task.Id}" IsChecked="{Binding IsCopyFuture, Mode=TwoWay}" Margin="0,0,6,0" />
+                                        <RadioButton Content="Copy to future" GroupName="{Binding Task.Id}" IsChecked="{Binding IsCopyFuture, Mode=TwoWay}" Margin="0,0,6,0" />
                                         <DatePicker SelectedDate="{Binding FutureDate, Mode=TwoWay}" IsEnabled="{Binding IsCopyFuture}" />
                                     </StackPanel>
-                                    <RadioButton Content="Mark as completed" GroupName="action_{Binding Task.Id}" IsChecked="{Binding IsMarkCompleted, Mode=TwoWay}" Margin="12,0,0,0" />
+                                    <RadioButton Content="Mark as completed" GroupName="{Binding Task.Id}" IsChecked="{Binding IsMarkCompleted, Mode=TwoWay}" Margin="12,0,0,0" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
