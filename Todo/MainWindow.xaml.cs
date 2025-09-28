@@ -247,14 +247,14 @@ namespace Todo
                                         else if (item.IsCopyFuture && item.FutureDate.HasValue)
                                         {
                                             var newKey = DateKey(item.FutureDate.Value.Date);
-                                            var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, t.LinkPath, Guid.NewGuid());
+                                            var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), true, item.FutureDate, t.LinkPath, t.Id);
                                             if (!AllTasks.ContainsKey(newKey)) AllTasks[newKey] = new List<TaskModel>();
                                             AllTasks[newKey].Add(copy);
                                         }
                                         else
                                         {
                                             var todayKey = DateKey(today);
-                                            var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, t.LinkPath, Guid.NewGuid());
+                                            var copy = new TaskModel(t.TaskName, false, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), false, null, t.LinkPath, t.Id);
                                             if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
                                             AllTasks[todayKey].Add(copy);
                                         }
@@ -1242,19 +1242,40 @@ namespace Todo
             UpdateTitle();
         }
 
+        // New helper: determine the date this task should be considered associated with (future date if set, otherwise the storage key date)
+        private DateTime? GetAssociatedDate(TaskModel t, string dateKey)
+        {
+            try
+            {
+                if (t != null && t.IsFuture && t.FutureDate.HasValue)
+                    return t.FutureDate.Value.Date;
+                if (!string.IsNullOrEmpty(dateKey) && DateTime.TryParseExact(dateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                    return dt.Date;
+            }
+            catch { }
+            return null;
+        }
+
+        // People filtering: default to only show tasks due today or in future; toggle shows older/completed tasks
         private void ApplyPeopleFilter(string person)
         {
             TaskList.Clear();
-            // Include date key so we can filter out old completed items when appropriate
+            // Include date key so we can filter by task date
             var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
             var tasks = entries.Where(e => e.Task.People != null && e.Task.People.Count > 0).Select(e => new { e.Task, e.DateKey });
             if (!string.IsNullOrEmpty(person))
                 tasks = tasks.Where(e => e.Task.People.Contains(person));
 
             bool showAll = PeopleShowAllToggle?.IsChecked == true;
-            // Exclude tasks that are completed and dated yesterday or before unless 'show all' is set
             if (!showAll)
-                tasks = tasks.Where(e => !IsOldCompleted(e.Task, e.DateKey));
+            {
+                tasks = tasks.Where(e =>
+                {
+                    var assoc = GetAssociatedDate(e.Task, e.DateKey);
+                    // include tasks that are today or in the future
+                    return assoc.HasValue ? assoc.Value.Date >= DateTime.Today : true;
+                });
+            }
 
             var unique = tasks.GroupBy(e => e.Task.Id).Select(g => g.First().Task).ToList();
             foreach (var t in unique)
@@ -1274,9 +1295,14 @@ namespace Todo
                 tasks = tasks.Where(e => e.Task.Meetings.Contains(meeting));
 
             bool showAll = MeetingsShowAllToggle?.IsChecked == true;
-            // Exclude tasks that are completed and dated yesterday or before unless 'show all' is set
             if (!showAll)
-                tasks = tasks.Where(e => !IsOldCompleted(e.Task, e.DateKey));
+            {
+                tasks = tasks.Where(e =>
+                {
+                    var assoc = GetAssociatedDate(e.Task, e.DateKey);
+                    return assoc.HasValue ? assoc.Value.Date >= DateTime.Today : true;
+                });
+            }
 
             var unique = tasks.GroupBy(e => e.Task.Id).Select(g => g.First().Task).ToList();
             foreach (var t in unique)
@@ -1595,10 +1621,14 @@ namespace Todo
                 }
                 else
                 {
-                    // only people who have active (incomplete) tasks (exclude old completed)
-                    people = entries.Where(e => e.Task.People != null && e.Task.People.Count > 0 && !IsOldCompleted(e.Task, e.DateKey) && !e.Task.IsComplete)
-                                     .SelectMany(e => e.Task.People)
-                                     .Distinct();
+                    // only people who have tasks due today or in the future
+                    people = entries.Where(e =>
+                    {
+                        var assoc = GetAssociatedDate(e.Task, e.DateKey);
+                        return assoc.HasValue ? assoc.Value.Date >= DateTime.Today : true;
+                    })
+                    .SelectMany(e => e.Task.People)
+                    .Distinct();
                 }
                 var list = people.OrderBy(s => s).ToList();
                 list.Insert(0, ""); // blank = any
@@ -1623,10 +1653,14 @@ namespace Todo
                 }
                 else
                 {
-                    // only meetings that have active (incomplete) tasks
-                    meetings = entries.Where(e => e.Task.Meetings != null && e.Task.Meetings.Count > 0 && !IsOldCompleted(e.Task, e.DateKey) && !e.Task.IsComplete)
-                                       .SelectMany(e => e.Task.Meetings)
-                                       .Distinct();
+                    // only meetings that have tasks due today or in the future
+                    meetings = entries.Where(e =>
+                    {
+                        var assoc = GetAssociatedDate(e.Task, e.DateKey);
+                        return assoc.HasValue ? assoc.Value.Date >= DateTime.Today : true;
+                    })
+                    .SelectMany(e => e.Task.Meetings)
+                    .Distinct();
                 }
                 var list = meetings.OrderBy(s => s).ToList();
                 list.Insert(0, "");
@@ -1678,6 +1712,19 @@ namespace Todo
             {
                 MessageBox.Show("Failed to open time tracking dialog: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        // Expose a minimal accessor for the AllTasks dictionary to other classes (read-only snapshot)
+        public static System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>> GetAllTasks()
+        {
+            // Return a shallow copy to avoid external mutation
+            try
+            {
+                var mw = System.Windows.Application.Current?.MainWindow as MainWindow;
+                if (mw == null) return new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>>();
+                return mw.AllTasks.ToDictionary(kv => kv.Key, kv => kv.Value);
+            }
+            catch { return new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>>(); }
         }
     }
 }

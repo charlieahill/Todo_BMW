@@ -79,6 +79,12 @@ namespace Todo
             }
         }
 
+        // New: public read-only TaskId for binding in history tab
+        public string TaskId { get; private set; }
+
+        // New: history entries (list of date strings)
+        public ObservableCollection<string> HistoryEntries { get; private set; } = new ObservableCollection<string>();
+
         public TaskDialog(TaskModel model, IEnumerable<string> peopleSuggestions, IEnumerable<string> meetingSuggestions)
         {
             InitializeComponent();
@@ -108,6 +114,35 @@ namespace Todo
             // initialize link
             LinkBox.Text = model.LinkPath ?? string.Empty;
             LinkPath = model.LinkPath ?? string.Empty;
+
+            // Populate history and TaskId by scanning AllTasks for same Id
+            TaskId = model.Id.ToString();
+            try
+            {
+                var entries = new List<(DateTime? Date, string Key, string Title)>();
+                foreach (var kv in MainWindow.GetAllTasks())
+                {
+                    var key = kv.Key;
+                    var list = kv.Value;
+                    var found = list.FirstOrDefault(t => t.Id == model.Id);
+                    if (found != null)
+                    {
+                        DateTime? dt = null;
+                        if (DateTime.TryParseExact(key, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsed))
+                            dt = parsed.Date;
+                        entries.Add((dt, key, found.TaskName ?? string.Empty));
+                    }
+                }
+
+                // Sort by date (nulls last) then by key
+                var sorted = entries.OrderBy(e => e.Date.HasValue ? 0 : 1).ThenBy(e => e.Date).ThenBy(e => e.Key).ToList();
+                foreach (var e in sorted)
+                {
+                    var dateText = e.Date.HasValue ? e.Date.Value.ToString("yyyy-MM-dd") : e.Key;
+                    HistoryEntries.Add($"{dateText} — {e.Title}");
+                }
+            }
+            catch { }
         }
 
         private void PeopleBox_KeyDown(object sender, KeyEventArgs e)
