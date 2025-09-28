@@ -9,6 +9,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Globalization;
+using PdfSharpCore.Drawing;
+using PdfSharpCore.Pdf;
 
 namespace Todo
 {
@@ -18,10 +20,24 @@ namespace Todo
         // track the currently active/selected day so we can persist edits when selection changes
         private DayViewModel _activeDay = null;
 
+        // Toggle to colour month grid by physical location instead of day type
+        public static bool ColorByPhysicalLocation { get; set; } = false;
+
         // Temporary visual debug: set to true to highlight and show diagnostic info for hours worked
         // private const bool DebugShowTotals = true;
 
         private const string WindowSettingsFile = "timetracking_window.json";
+
+        // Helper colors map for DayType palette (same as DayViewModel.BackgroundBrush)
+        private static readonly Dictionary<DayType, XColor> DayTypePdfColors = new Dictionary<DayType, XColor>
+        {
+            { DayType.WorkingDay, XColor.FromArgb(0xFF, 0xDF, 0xF0, 0xD8) },
+            { DayType.Weekend, XColor.FromArgb(0xFF, 0xF0, 0xF0, 0xF0) },
+            { DayType.PublicHoliday, XColor.FromArgb(0xFF, 0xFF, 0xE5, 0xE5) },
+            { DayType.Vacation, XColor.FromArgb(0xFF, 0xDD, 0xEE, 0xFF) },
+            { DayType.TimeInLieu, XColor.FromArgb(0xFF, 0xFF, 0xF2, 0xCC) },
+            { DayType.Other, XColor.FromArgb(0xFF, 0xEF, 0xEF, 0xEF) }
+        };
 
         public TimeTrackingDialog()
         {
@@ -217,13 +233,26 @@ namespace Todo
                 {
                     d.PositionOverride = ov.Position;
                     d.LocationOverride = ov.Location;
-                    d.PhysicalLocationOverride = ov.PhysicalLocation;
+                    // If override contains a specific physical location, prefer that. Otherwise default to employment/location value
+                    if (!string.IsNullOrWhiteSpace(ov.PhysicalLocation))
+                        d.PhysicalLocationOverride = ov.PhysicalLocation;
+                    else if (!string.IsNullOrWhiteSpace(ov.Location))
+                        d.PhysicalLocationOverride = ov.Location;
+                    else if (d.Template != null && !string.IsNullOrWhiteSpace(d.Template.Location))
+                        d.PhysicalLocationOverride = d.Template.Location;
+
                     d.TargetHours = ov.TargetHours;
                     // load persisted DayType override if present
                     if (ov.DayType.HasValue)
                     {
                         d.SetDayType(ov.DayType.Value);
                     }
+                }
+                else
+                {
+                    // default physical location to template employment location if available
+                    if (d.Template != null && !string.IsNullOrWhiteSpace(d.Template.Location))
+                        d.PhysicalLocationOverride = d.Template.Location;
                 }
 
                 // load persisted shifts for day
@@ -528,7 +557,8 @@ namespace Todo
                 // prefer persisted overrides if present
                 PositionCombo.Text = !string.IsNullOrWhiteSpace(vm.PositionOverride) ? vm.PositionOverride : vm.Template?.JobDescription ?? "";
                 LocationCombo.Text = !string.IsNullOrWhiteSpace(vm.LocationOverride) ? vm.LocationOverride : vm.Template?.Location ?? "";
-                PhysicalLocationCombo.Text = !string.IsNullOrWhiteSpace(vm.PhysicalLocationOverride) ? vm.PhysicalLocationOverride : "";
+                // default physical location to physical override, otherwise location override or template location
+                PhysicalLocationCombo.Text = !string.IsNullOrWhiteSpace(vm.PhysicalLocationOverride) ? vm.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(vm.LocationOverride) ? vm.LocationOverride : vm.Template?.Location ?? "");
                 ShiftsList.ItemsSource = vm.Shifts;
                 // Immediately set displayed total so it is visible even if UpdateShiftTotalsDisplay silently fails
                 try
@@ -791,8 +821,48 @@ namespace Todo
                     TimeTrackingService.Instance.SetAccountState(acc);
                     var entry = new AccountLogEntry { Date = DateTime.Now, Kind = "Holiday", Delta = delta, Balance = acc.HolidayOffset, Note = applyAsDelta ? "Manual delta" : "Manual set" };
                     TimeTrackingService.Instance.AddAccountLogEntry(entry);
-                    RecomputeCumulatives();
-                    UpdateAccountsDisplay();
+
+                    // Reload persisted state to ensure any other components reading from disk see latest data
+                    try { TimeTrackingService.Instance.Reload(); } catch { }
+
+                    // Preserve current selection date
+                    var selectedDate = _activeDay?.Date;
+
+                    // Refresh computed cumulatives and UI so changes are visible immediately
+                    try
+                    {
+                        PopulateDaysForCurrentMonth();
+                        RecomputeCumulatives();
+                        UpdateAccountsDisplay();
+
+                        // also explicitly set account textblocks from service to ensure update
+                        try
+                        {
+                            var fresh = TimeTrackingService.Instance.GetAccountState();
+                            if (this.FindName("AccountHolidayValue") is TextBlock ah2)
+                                ah2.Text = fresh.HolidayOffset.ToString("0.##") + " days";
+                            if (this.FindName("AccountTILValue") is TextBlock at2)
+                                at2.Text = fresh.TILOffset.ToString("0.##") + " hours";
+                        }
+                        catch { }
+
+                        // restore selection if possible
+                        if (selectedDate.HasValue)
+                        {
+                            var sel = _currentDays.FirstOrDefault(d => d.Date.Date == selectedDate.Value.Date);
+                            if (sel != null)
+                            {
+                                DaysList.SelectedItem = sel;
+                                sel.IsSelected = true;
+                                _activeDay = sel;
+                            }
+                        }
+
+                        DaysList.Items.Refresh();
+                        MonthGrid.Items.Refresh();
+                    }
+                    catch { }
+
                     MessageBox.Show("Holiday account updated.", "Reset", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
@@ -849,8 +919,47 @@ namespace Todo
                     TimeTrackingService.Instance.SetAccountState(acc);
                     var entry = new AccountLogEntry { Date = DateTime.Now, Kind = "TIL", Delta = delta, Balance = acc.TILOffset, Note = applyAsDelta ? "Manual delta" : "Manual set" };
                     TimeTrackingService.Instance.AddAccountLogEntry(entry);
-                    RecomputeCumulatives();
-                    UpdateAccountsDisplay();
+
+                    // Reload persisted state
+                    try { TimeTrackingService.Instance.Reload(); } catch { }
+
+                    // preserve current selected date
+                    var selectedDate = _activeDay?.Date;
+
+                    // Refresh computed cumulatives and UI so changes are visible immediately
+                    try
+                    {
+                        PopulateDaysForCurrentMonth();
+                        RecomputeCumulatives();
+                        UpdateAccountsDisplay();
+
+                        // explicitly update account textblocks
+                        try
+                        {
+                            var fresh = TimeTrackingService.Instance.GetAccountState();
+                            if (this.FindName("AccountHolidayValue") is TextBlock ah3)
+                                ah3.Text = fresh.HolidayOffset.ToString("0.##") + " days";
+                            if (this.FindName("AccountTILValue") is TextBlock at3)
+                                at3.Text = fresh.TILOffset.ToString("0.##") + " hours";
+                        }
+                        catch { }
+
+                        if (selectedDate.HasValue)
+                        {
+                            var sel = _currentDays.FirstOrDefault(d => d.Date.Date == selectedDate.Value.Date);
+                            if (sel != null)
+                            {
+                                DaysList.SelectedItem = sel;
+                                sel.IsSelected = true;
+                                _activeDay = sel;
+                            }
+                        }
+
+                        DaysList.Items.Refresh();
+                        MonthGrid.Items.Refresh();
+                    }
+                    catch { }
+
                     MessageBox.Show("Time in Lieu account updated.", "Reset", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
@@ -926,6 +1035,257 @@ namespace Todo
              }
              catch { }
          }
+
+         // Handler for color toggle checkbox
+         private void ColorModeCheck_Checked(object sender, RoutedEventArgs e)
+         {
+             ColorByPhysicalLocation = true;
+             MonthGrid.Items.Refresh();
+             DaysList.Items.Refresh();
+         }
+
+         private void ColorModeCheck_Unchecked(object sender, RoutedEventArgs e)
+         {
+             ColorByPhysicalLocation = false;
+             MonthGrid.Items.Refresh();
+             DaysList.Items.Refresh();
+         }
+
+        // Export year colour map button handler
+        private void ExportYearMap_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (YearCombo.SelectedItem == null)
+                {
+                    MessageBox.Show("Select a year first.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                int year = int.Parse((string)YearCombo.SelectedItem);
+
+                // gather all days for the year
+                var first = new DateTime(year, 1, 1);
+                var last = new DateTime(year, 12, 31);
+                var summaries = TimeTrackingService.Instance.GetDaySummaries(first, last);
+                var days = summaries.Select(s => new DayViewModel(s)).ToList();
+
+                // apply overrides and shifts to days so DayType and PhysicalLocationOverride are accurate
+                foreach (var d in days)
+                {
+                    var ov = TimeTrackingService.Instance.GetOverrideForDate(d.Date);
+                    if (ov != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(ov.PhysicalLocation)) d.PhysicalLocationOverride = ov.PhysicalLocation;
+                        else if (!string.IsNullOrWhiteSpace(ov.Location)) d.PhysicalLocationOverride = ov.Location;
+                        d.PositionOverride = ov.Position; d.LocationOverride = ov.Location; d.TargetHours = ov.TargetHours; if (ov.DayType.HasValue) d.SetDayType(ov.DayType.Value);
+                    }
+                    // load persisted shifts
+                    var saved = TimeTrackingService.Instance.GetShiftsForDate(d.Date).ToList();
+                    if (saved.Any()) d.Shifts = saved.Select(s2 => new Shift { Date = s2.Date, Start = s2.Start, End = s2.End, Description = s2.Description, ManualStartOverride = s2.ManualStartOverride, ManualEndOverride = s2.ManualEndOverride, LunchBreak = s2.LunchBreak, DayMode = s2.DayMode }).ToList();
+                }
+
+                // prompt for filename
+                var dlg = new Microsoft.Win32.SaveFileDialog { Filter = "PDF files (*.pdf)|*.pdf", FileName = $"timemap_{year}.pdf" };
+                if (dlg.ShowDialog() != true) return;
+
+                // create PDF with two pages: Day type map and Physical location map
+                using (var doc = new PdfDocument())
+                {
+                    // page 1: day type
+                    var p1 = doc.AddPage();
+                    p1.Size = PdfSharpCore.PageSize.A4;
+                    using (var g = XGraphics.FromPdfPage(p1))
+                    {
+                        DrawYearGridToGraphics(g, days, year, colorByPhysical: false);
+                    }
+
+                    // page 2: physical location
+                    var p2 = doc.AddPage();
+                    p2.Size = PdfSharpCore.PageSize.A4;
+                    using (var g = XGraphics.FromPdfPage(p2))
+                    {
+                        DrawYearGridToGraphics(g, days, year, colorByPhysical: true);
+                    }
+
+                    using (var fs = File.OpenWrite(dlg.FileName))
+                    {
+                        doc.Save(fs);
+                    }
+                }
+
+                MessageBox.Show($"Exported year colour map to PDF.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to export: " + ex.Message, "Export", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // Draws a monthly grid layout for the whole year on the given graphics surface.
+        private void DrawYearGridToGraphics(XGraphics g, List<DayViewModel> days, int year, bool colorByPhysical)
+        {
+            // page layout constants
+            double margin = 30;
+            double pageWidth = g.PageSize.Width;
+            double pageHeight = g.PageSize.Height;
+            double contentWidth = pageWidth - (margin * 2);
+            // reserve room at bottom for a horizontal legend
+            double legendHeight = 70;
+
+            // draw header
+            var headerFont = new XFont("Arial", 18, XFontStyle.Bold);
+            var subFont = new XFont("Arial", 10, XFontStyle.Regular);
+            g.DrawString((colorByPhysical ? "Physical location map - " : "Day type map - ") + year.ToString(), headerFont, XBrushes.Black, new XRect(margin, 10, contentWidth, 30), XStringFormats.TopLeft);
+
+            // layout 12 months in 3x4 grid
+            int cols = 3; int rows = 4;
+            double gap = 8;
+            double monthWidth = (contentWidth - (gap * (cols - 1))) / cols;
+            // leave extra space at bottom for horizontal legend
+            double monthGridAvailableHeight = pageHeight - 80 - legendHeight - (gap * (rows - 1));
+            double monthHeight = monthGridAvailableHeight / rows;
+
+            for (int m = 1; m <= 12; m++)
+            {
+                int monthIndex = m - 1;
+                int col = monthIndex % cols;
+                int row = monthIndex / cols;
+                double x = margin + col * (monthWidth + gap);
+                double y = 50 + row * (monthHeight + gap);
+
+                DrawSingleMonth(g, days, year, m, new XRect(x, y, monthWidth, monthHeight), colorByPhysical);
+            }
+
+            // add small legend horizontally across bottom
+            DrawLegend(g, margin, pageHeight - legendHeight + 12, colorByPhysical, days, contentWidth);
+        }
+
+        private void DrawSingleMonth(XGraphics g, List<DayViewModel> days, int year, int month, XRect rect, bool colorByPhysical)
+        {
+            // draw month title
+            var monthName = CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(month);
+            var titleFont = new XFont("Arial", 12, XFontStyle.Bold);
+            g.DrawString(monthName + " " + year.ToString(), titleFont, XBrushes.Black, new XPoint(rect.X + 4, rect.Y + 14));
+
+            // cell grid for 7 columns x up to 6 rows
+            double top = rect.Y + 22;
+            double left = rect.X + 2;
+            double gridWidth = rect.Width - 4;
+            double gridHeight = rect.Height - 28;
+            int cols = 7;
+            int rows = 6;
+            double cellW = gridWidth / cols;
+            double cellH = gridHeight / rows;
+
+            // first day offset: start week on Monday
+            var first = new DateTime(year, month, 1);
+            int leading = (int)first.DayOfWeek - 1; if (leading < 0) leading += 7;
+
+            for (int i = 0; i < rows * cols; i++)
+            {
+                int dayNum = i - leading + 1;
+                double cx = left + (i % cols) * cellW;
+                double cy = top + (i / cols) * cellH;
+                var cellRect = new XRect(cx, cy, cellW - 1, cellH - 1);
+
+                if (dayNum >= 1 && dayNum <= DateTime.DaysInMonth(year, month))
+                {
+                    var d = days.FirstOrDefault(dd => dd.Date.Year == year && dd.Date.Month == month && dd.Date.Day == dayNum);
+                    XBrush brush = XBrushes.White;
+                    if (d != null)
+                    {
+                        if (colorByPhysical)
+                        {
+                            var key = !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) ? d.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? "");
+                            if (string.IsNullOrWhiteSpace(key)) brush = XBrushes.White;
+                            else
+                            {
+                                int h = key.GetHashCode();
+                                byte r = (byte)(80 + (Math.Abs(h) % 176));
+                                byte gcol = (byte)(80 + (Math.Abs(h / 7) % 176));
+                                byte b = (byte)(80 + (Math.Abs(h / 13) % 176));
+                                brush = new XSolidBrush(XColor.FromArgb(255, r, gcol, b));
+                            }
+                        }
+                        else
+                        {
+                            if (DayTypePdfColors.TryGetValue(d.DayType, out var c)) brush = new XSolidBrush(c);
+                            else brush = XBrushes.White;
+                        }
+                    }
+
+                    g.DrawRectangle(brush, cellRect);
+                    // draw day number
+                    var numFont = new XFont("Arial", 8, XFontStyle.Regular);
+                    g.DrawString(dayNum.ToString(), numFont, XBrushes.Black, new XPoint(cellRect.X + 4, cellRect.Y + 10));
+                }
+                else
+                {
+                    // blank
+                    g.DrawRectangle(XBrushes.LightGray, cellRect);
+                }
+            }
+
+            // border
+            g.DrawRectangle(XPens.Black, rect.X, rect.Y, rect.Width, rect.Height);
+        }
+
+        private void DrawLegend(XGraphics g, double x, double y, bool colorByPhysical, List<DayViewModel> days, double availableWidth)
+        {
+            var font = new XFont("Arial", 9, XFontStyle.Regular);
+            double box = 12; double gap = 8; double cx = x;
+            double startX = x;
+            double padding = 6;
+            // compute available horizontal area and center legend items
+            if (!colorByPhysical)
+            {
+                var items = DayTypePdfColors.Keys.Select(k => k.ToString()).ToList();
+                // estimate width per item
+                var widths = items.Select(it => g.MeasureString(it, font).Width + box + gap + padding).ToList();
+                double totalW = widths.Sum();
+                cx = startX + Math.Max(0, (availableWidth - totalW) / 2);
+                for (int i = 0; i < items.Count; i++)
+                {
+                    var key = items[i];
+                    var brush = new XSolidBrush(DayTypePdfColors[(DayType)Enum.Parse(typeof(DayType), key)]);
+                    g.DrawRectangle(brush, cx, y, box, box);
+                    g.DrawString(key, font, XBrushes.Black, new XPoint(cx + box + 6, y + box - 2));
+                    cx += widths[i];
+                }
+            }
+            else
+            {
+                // show top N physical locations found horizontally
+                var locs = daysForLegendLookup();
+                int max = Math.Min(8, locs.Count);
+                var widths = new List<double>();
+                for (int i = 0; i < max; i++) widths.Add(g.MeasureString(locs[i], font).Width + box + gap + padding);
+                double totalW = widths.Sum();
+                cx = startX + Math.Max(0, (availableWidth - totalW) / 2);
+                for (int i = 0; i < max; i++)
+                {
+                    var key = locs[i];
+                    int h = key.GetHashCode();
+                    byte r = (byte)(80 + (Math.Abs(h) % 176));
+                    byte gcol = (byte)(80 + (Math.Abs(h / 7) % 176));
+                    byte b = (byte)(80 + (Math.Abs(h / 13) % 176));
+                    var brush = new XSolidBrush(XColor.FromArgb(255, r, gcol, b));
+                    g.DrawRectangle(brush, cx, y, box, box);
+                    g.DrawString(key, font, XBrushes.Black, new XPoint(cx + box + 6, y + box - 2));
+                    cx += widths[i];
+                }
+            }
+
+            // local function to obtain most common physical locations
+            List<string> daysForLegendLookup()
+            {
+                var locs = days.Where(d => !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) || !string.IsNullOrWhiteSpace(d.LocationOverride) || !string.IsNullOrWhiteSpace(d.Template?.Location))
+                               .Select(d => !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) ? d.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? ""))
+                               .Where(s => !string.IsNullOrWhiteSpace(s))
+                               .GroupBy(s => s).OrderByDescending(gp => gp.Count()).Select(gp => gp.Key).ToList();
+                return locs;
+            }
+        }
     }
 
     // Simple settings for window position/size
@@ -1000,8 +1360,81 @@ namespace Todo
             {
                 Shifts = new List<Shift>();
             }
+
+            // If no persisted shifts but DaySummary contains open/close times, create a synthetic shift so the UI shows what was used to compute WorkedHours
+            if ((Shifts == null || Shifts.Count == 0) && s.OpenTime.HasValue && s.CloseTime.HasValue)
+            {
+                try
+                {
+                    var start = s.OpenTime.Value;
+                    var end = s.CloseTime.Value;
+                    // ensure valid ordering
+                    if (end <= start)
+                    {
+                        // if close <= open, treat worked as 0 and do not add
+                    }
+                    else
+                    {
+                        var synthetic = new Shift
+                        {
+                            Date = Date,
+                            Start = start,
+                            End = end,
+                            Description = "(from events)",
+                            LunchBreak = TimeSpan.Zero,
+                            ManualStartOverride = false,
+                            ManualEndOverride = false,
+                            DayMode = "auto"
+                        };
+                        Shifts.Add(synthetic);
+                    }
+                }
+                catch { }
+            }
         }
 
         public void SetDayType(DayType dt) => DayType = dt;
+
+        // Computed background brush used by month grid. Respects global toggle in TimeTrackingDialog.ColorByPhysicalLocation
+        public Brush BackgroundBrush
+        {
+            get
+            {
+                try
+                {
+                    if (TimeTrackingDialog.ColorByPhysicalLocation)
+                    {
+                        var key = !string.IsNullOrWhiteSpace(PhysicalLocationOverride) ? PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(LocationOverride) ? LocationOverride : Template?.Location ?? "");
+                        if (string.IsNullOrWhiteSpace(key))
+                            return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFFFFFFF"));
+
+                        int h = key.GetHashCode();
+                        // produce a pleasant pastel color
+                        byte r = (byte)(80 + (Math.Abs(h) % 176));
+                        byte g = (byte)(80 + (Math.Abs(h / 7) % 176));
+                        byte b = (byte)(80 + (Math.Abs(h / 13) % 176));
+                        return new SolidColorBrush(Color.FromRgb(r, g, b));
+                    }
+                    else
+                    {
+                        // colour by day type using existing palette
+                        switch (DayType)
+                        {
+                            case DayType.WorkingDay: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFDFF0D8"));
+                            case DayType.Weekend: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF0F0F0"));
+                            case DayType.PublicHoliday: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFFFE5E5"));
+                            case DayType.Vacation: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFDDEEFF"));
+                            case DayType.TimeInLieu: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFFFF2CC"));
+                            case DayType.Other: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFEFEFEF"));
+                            default: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFFFFFFF"));
+                        }
+                    }
+                }
+                catch
+                {
+                    return new SolidColorBrush(Colors.White);
+                }
+            }
+        }
     }
-}
+ }

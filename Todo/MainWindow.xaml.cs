@@ -27,8 +27,10 @@ namespace Todo
     /// </summary>
     public partial class MainWindow : Window
     {
-        private const string SaveFileName = "tasks_by_date.json";
-        private const string MetaFileName = "meta.json";
+        // All persisted user-visible files go under My Documents/CHillSW/TodoBMW
+        private static readonly string DataDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "CHillSW", "TodoBMW");
+        private static readonly string SaveFileName = System.IO.Path.Combine(DataDirectory, "tasks_by_date.json");
+        private static readonly string MetaFileName = System.IO.Path.Combine(DataDirectory, "meta.json");
 
         // All tasks keyed by date string (yyyy-MM-dd)
         private Dictionary<string, List<TaskModel>> AllTasks { get; set; } = new Dictionary<string, List<TaskModel>>();
@@ -41,17 +43,20 @@ namespace Todo
 
         // Auto-backup support
         private DispatcherTimer _autoBackupTimer;
-        private const string AutoBackupFolder = "autobackups";
+        private static readonly string AutoBackupFolder = System.IO.Path.Combine(DataDirectory, "autobackups");
         private const int AutoBackupKeep = 20; // keep 20 most recent autobackups
         private readonly TimeSpan AutoBackupInterval = TimeSpan.FromHours(1); // run autobackup every hour
-        private const string StartupLogFile = "startup_checks.log";
+        private static readonly string StartupLogFile = System.IO.Path.Combine(DataDirectory, "startup_checks.log");
+        private static readonly string DebugLogFile = System.IO.Path.Combine(DataDirectory, "tasks_debug_log.txt");
 
         private void AppendStartupLog(string message)
         {
             try
             {
                 var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n";
-                File.AppendAllText(StartupLogFile, line);
+                // Ensure data directory exists
+                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+                System.IO.File.AppendAllText(StartupLogFile, line);
             }
             catch { /* don't break startup for logging failures */ }
         }
@@ -63,6 +68,9 @@ namespace Todo
             DataContext = this;
 
             _isInitializing = true;
+
+            // Ensure data directory exists before any IO
+            try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
 
             LoadTasks();
 
@@ -339,26 +347,6 @@ namespace Todo
             UpdateTotals();
         }
 
-        private void LogLoadedTasks(Dictionary<string, List<TaskModel>> items)
-        {
-            try
-            {
-                var logPath = "tasks_debug_log.txt";
-                var sb = new StringBuilder();
-                sb.AppendLine($"[{DateTime.Now}] Loaded AllTasks:");
-                foreach (var kv in items)
-                {
-                    sb.AppendLine($"Date: {kv.Key}");
-                    foreach (var t in kv.Value)
-                    {
-                        sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
-                    }
-                }
-                File.AppendAllText(logPath, sb.ToString());
-            }
-            catch { }
-        }
-
         private void SaveTasks()
         {
             if (_isInitializing) return; // don't save during startup
@@ -381,6 +369,9 @@ namespace Todo
                     sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
                 }
 
+                // Ensure data directory exists
+                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+
                 var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SaveFileName, json);
 
@@ -395,11 +386,35 @@ namespace Todo
             }
         }
 
+        private void LogLoadedTasks(Dictionary<string, List<TaskModel>> items)
+        {
+            try
+            {
+                // Ensure data directory exists
+                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+                var logPath = DebugLogFile;
+                var sb = new StringBuilder();
+                sb.AppendLine($"[{DateTime.Now}] Loaded AllTasks:");
+                foreach (var kv in items)
+                {
+                    sb.AppendLine($"Date: {kv.Key}");
+                    foreach (var t in kv.Value)
+                    {
+                        sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
+                    }
+                }
+                File.AppendAllText(logPath, sb.ToString());
+            }
+            catch { }
+        }
+
         private void LogAllTasks()
         {
             try
             {
-                var logPath = "tasks_debug_log.txt";
+                // Ensure data directory exists
+                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+                var logPath = DebugLogFile;
                 var sb = new StringBuilder();
                 sb.AppendLine($"[{DateTime.Now}] Saving AllTasks:");
                 foreach (var kv in AllTasks)
@@ -1429,9 +1444,13 @@ namespace Todo
             {
                 var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
                 var backupName = $"{timestamp}_tasks_backup.json";
+                // Ensure data directory exists
+                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+                var backupPath = System.IO.Path.Combine(DataDirectory, backupName);
+
                 if (File.Exists(SaveFileName))
                 {
-                    File.Copy(SaveFileName, backupName, overwrite: true);
+                    File.Copy(SaveFileName, backupPath, overwrite: true);
                 }
                 else
                 {
@@ -1440,9 +1459,9 @@ namespace Todo
                     foreach (var kv in AllTasks)
                          sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
                     var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(backupName, json);
+                    File.WriteAllText(backupPath, json);
                 }
-                MessageBox.Show($"Backup saved: {backupName}", "Backup", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show($"Backup saved: {backupPath}", "Backup", MessageBoxButton.OK, MessageBoxImage.Information);
                 UpdateLastBackupText(DateTime.Now);
 
                 // update totals as well
@@ -1460,7 +1479,7 @@ namespace Todo
             try
             {
                 var folder = AutoBackupFolder;
-                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+                try { Directory.CreateDirectory(folder); } catch { }
 
                 var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
                 var backupName = $"{timestamp}_tasks_backup.json";
@@ -1496,13 +1515,13 @@ namespace Todo
                 catch (Exception ex)
                 {
                     // Log trimming errors but don't interrupt auto-backup
-                    try { File.AppendAllText("tasks_debug_log.txt", $"[{DateTime.Now}] AutoBackup trim error: {ex.Message}\n"); } catch { }
+                    try { File.AppendAllText(DebugLogFile, $"[{DateTime.Now}] AutoBackup trim error: {ex.Message}\n"); } catch { }
                 }
             }
             catch (Exception ex)
             {
                 // Log errors silently for automatic backups
-                try { File.AppendAllText("tasks_debug_log.txt", $"[{DateTime.Now}] AutoBackup error: {ex.Message}\n"); } catch { }
+                try { File.AppendAllText(DebugLogFile, $"[{DateTime.Now}] AutoBackup error: {ex.Message}\n"); } catch { }
             }
         }
 
@@ -1525,13 +1544,16 @@ namespace Todo
                     }
                 }
 
-                // check root backups
-                foreach (var f in Directory.GetFiles(".", "*_tasks_backup.json"))
+                // check root backups in data directory
+                if (Directory.Exists(DataDirectory))
                 {
-                    var name = System.IO.Path.GetFileNameWithoutExtension(f);
-                    var parts = name.Split(new[] {"_tasks_backup"}, StringSplitOptions.None);
-                    if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
-                        candidates.Add(dt);
+                    foreach (var f in Directory.GetFiles(DataDirectory, "*_tasks_backup.json"))
+                    {
+                        var name = System.IO.Path.GetFileNameWithoutExtension(f);
+                        var parts = name.Split(new[] {"_tasks_backup"}, StringSplitOptions.None);
+                        if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                            candidates.Add(dt);
+                    }
                 }
 
                 if (candidates.Count == 0) return null;

@@ -75,13 +75,35 @@ namespace Todo
 
     public class TimeTrackingService
     {
-        private const string AccountsFile = "timetracking_accounts.json";
-        private const string AccountsLogFile = "timetracking_accountlog.json";
+        // All persisted user data files will be stored under the user's My Documents folder in CHillSW/TodoBMW
+        private static readonly string DataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "CHillSW", "TodoBMW");
+
+        // keep individual file name constants for clarity, but use full paths for IO
+        private const string AccountsFileName = "timetracking_accounts.json";
+        private const string AccountsLogFileName = "timetracking_accountlog.json";
+        private const string EventsFileName = "timetracking_events.json";
+        private const string TemplatesFileName = "timetracking_templates.json";
+        private const string OverridesFileName = "timetracking_overrides.json";
+        private const string ShiftsFileName = "timetracking_shifts.json";
+
+        private static readonly string AccountsFile = Path.Combine(DataDirectory, AccountsFileName);
+        private static readonly string AccountsLogFile = Path.Combine(DataDirectory, AccountsLogFileName);
+        private static readonly string EventsFile = Path.Combine(DataDirectory, EventsFileName);
+        private static readonly string TemplatesFile = Path.Combine(DataDirectory, TemplatesFileName);
+        private static readonly string OverridesFile = Path.Combine(DataDirectory, OverridesFileName);
+        private static readonly string ShiftsFile = Path.Combine(DataDirectory, ShiftsFileName);
+
+        // Ensure data directory exists before any IO
+        static TimeTrackingService()
+        {
+            try
+            {
+                Directory.CreateDirectory(DataDirectory);
+            }
+            catch { }
+        }
+
         private AccountState _accounts = new AccountState { TILOffset = 0.0, HolidayOffset = 0.0 };
-        private const string EventsFile = "timetracking_events.json";
-        private const string TemplatesFile = "timetracking_templates.json";
-        private const string OverridesFile = "timetracking_overrides.json";
-        private const string ShiftsFile = "timetracking_shifts.json";
         private List<TimeEvent> _events = new List<TimeEvent>();
         private List<TimeTemplate> _templates = new List<TimeTemplate>();
         private List<DayOverride> _overrides = new List<DayOverride>();
@@ -457,6 +479,16 @@ namespace Todo
                 if (entry == null) return;
                 _accountLog.Add(entry);
                 SaveAccountLog();
+            }
+            catch { }
+        }
+
+        // Public helper to reload persisted data from disk into the service singleton
+        public void Reload()
+        {
+            try
+            {
+                Load();
             }
             catch { }
         }

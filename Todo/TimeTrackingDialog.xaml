@@ -30,7 +30,7 @@
         </DataTemplate>
 
         <DataTemplate x:Key="MonthGridItemTemplate">
-            <Border x:Name="MonthBorder" Padding="6" Margin="2" CornerRadius="4" MouseLeftButtonUp="MonthGridItem_Click">
+            <Border x:Name="MonthBorder" Padding="6" Margin="2" CornerRadius="4" MouseLeftButtonUp="MonthGridItem_Click" Background="{Binding BackgroundBrush}">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Date.Day}" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" />
                 </StackPanel>
@@ -40,13 +40,6 @@
                         <Setter Property="BorderBrush" Value="Transparent" />
                         <Setter Property="BorderThickness" Value="1" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding DayType}" Value="WorkingDay"><Setter Property="Background" Value="#FFDFF0D8"/></DataTrigger>
-                            <DataTrigger Binding="{Binding DayType}" Value="Weekend"><Setter Property="Background" Value="#FFF0F0F0"/></DataTrigger>
-                            <DataTrigger Binding="{Binding DayType}" Value="PublicHoliday"><Setter Property="Background" Value="#FFFFE5E5"/></DataTrigger>
-                            <DataTrigger Binding="{Binding DayType}" Value="Vacation"><Setter Property="Background" Value="#FFDDEEFF"/></DataTrigger>
-                            <DataTrigger Binding="{Binding DayType}" Value="TimeInLieu"><Setter Property="Background" Value="#FFFFF2CC"/></DataTrigger>
-                            <DataTrigger Binding="{Binding DayType}" Value="Other"><Setter Property="Background" Value="#FFEFEFEF"/></DataTrigger>
-
                             <!-- Today indicator: green border -->
                             <DataTrigger Binding="{Binding IsToday}" Value="True">
                                 <Setter Property="BorderBrush" Value="#FF2E8B57"/>
@@ -77,6 +70,7 @@
                 <ComboBox x:Name="YearCombo" Width="120" SelectionChanged="YearCombo_SelectionChanged"/>
                 <ComboBox x:Name="MonthCombo" Width="150" Margin="8,0,0,0" SelectionChanged="MonthCombo_SelectionChanged"/>
                 <Button Content="Today" Margin="8,0,0,0" Click="TodayButton_Click" />
+                <CheckBox x:Name="ColorModeCheck" Content="Color by physical location" Margin="8,0,0,0" VerticalAlignment="Center" Checked="ColorModeCheck_Checked" Unchecked="ColorModeCheck_Unchecked" />
             </StackPanel>
 
             <!-- Custom month grid -->
@@ -96,123 +90,9 @@
         </StackPanel>
 
         <!-- Right column: details and templates -->
-        <StackPanel Grid.Column="1" Margin="12,0,0,0">
-            <!-- Details header and selected date on same line -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
-                <TextBlock Text="Details" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
-                <TextBlock x:Name="SelectedDateLabel" Text="" FontWeight="Normal" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="Gray" />
-            </StackPanel>
-
-            <Grid Margin="0,6,0,6">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <StackPanel Grid.Row="0">
-                    <TextBlock Text="Employment Position" />
-                    <ComboBox x:Name="PositionCombo" IsEditable="True" />
-                </StackPanel>
-
-                <StackPanel Grid.Row="1" Margin="0,6,0,0">
-                    <TextBlock Text="Location" />
-                    <ComboBox x:Name="LocationCombo" IsEditable="True" />
-                </StackPanel>
-
-                <StackPanel Grid.Row="2" Margin="0,6,0,0">
-                    <TextBlock Text="Day Type" />
-                    <ComboBox x:Name="DayTypeCombo" SelectionChanged="DayTypeCombo_SelectionChanged" />
-                </StackPanel>
-            </Grid>
-
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                <StackPanel>
-                    <TextBlock Text="Physical Location" />
-                    <ComboBox x:Name="PhysicalLocationCombo" IsEditable="True" Width="240"/>
-                </StackPanel>
-                <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="8,18,0,0">
-                    <Button Content="Save as Default" Click="SaveDefaults_Click" Width="110"/>
-                </StackPanel>
-            </StackPanel>
-
-            <TextBlock Text="Templates" FontWeight="Bold" />
-            <DockPanel Margin="0,4,0,8">
-                <ListBox x:Name="TemplatesList" DisplayMemberPath="TemplateName" Height="80" DockPanel.Dock="Left" Width="280" MouseDoubleClick="TemplatesList_MouseDoubleClick" />
-                <StackPanel Orientation="Vertical" DockPanel.Dock="Right" Margin="8,0,0,0">
-                    <Button Content="Edit" Click="TemplatesList_Edit_Click" Width="80" Margin="0,0,0,6" />
-                    <Button Content="Delete" Click="DeleteTemplate_Click" Width="80" />
-                </StackPanel>
-            </DockPanel>
-
-            <GroupBox Header="Shifts" Margin="0,6,0,6">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,4">
-                        <Button Content="Add" Click="AddShift_Click" Margin="0,0,6,0" />
-                        <Button Content="Edit" Click="EditShift_Click" Margin="0,0,6,0" />
-                        <Button Content="Delete" Click="DeleteShift_Click" />
-                    </StackPanel>
-                    <StackPanel>
-                        <ListBox x:Name="ShiftsList" MouseDoubleClick="ShiftsList_MouseDoubleClick">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Padding="4">
-                                        <StackPanel>
-                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBlock x:Name="StartText" FontWeight="Bold" Text="{Binding StartDisplay}" Foreground="Black" />
-                                                <TextBlock Text=" " />
-                                                <TextBlock x:Name="StartInfo" Text="&#x2139;" Foreground="DodgerBlue" Margin="6,0,0,0" Visibility="Collapsed" />
-                                                <TextBlock Text=" - " Margin="6,0" />
-                                                <TextBlock x:Name="EndText" FontWeight="Bold" Text="{Binding EndDisplay}" Foreground="Black" />
-                                                <TextBlock Text=" " />
-                                                <TextBlock x:Name="EndInfo" Text="&#x2139;" Foreground="DodgerBlue" Margin="6,0,0,0" Visibility="Collapsed" />
-                                                <!-- worked hours for this shift -->
-                                                <TextBlock Text="  " />
-                                                <TextBlock Text="(" Foreground="Gray" />
-                                                <TextBlock Text="{Binding Hours, StringFormat={}{0:0.##}h}" Foreground="Gray" />
-                                                <TextBlock Text=")" Foreground="Gray" />
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding Description}" FontStyle="Italic" FontSize="12" />
-                                            <TextBlock Text="{Binding LunchDisplay}" FontSize="11" Foreground="Gray" />
-                                            <TextBlock Text="{Binding DayModeDisplay}" FontSize="11" Foreground="Gray" />
-                                        </StackPanel>
-                                    </Border>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding ManualStartOverride}" Value="True">
-                                            <Setter TargetName="StartText" Property="Foreground" Value="Red" />
-                                            <Setter TargetName="StartInfo" Property="Visibility" Value="Visible" />
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding ManualEndOverride}" Value="True">
-                                            <Setter TargetName="EndText" Property="Foreground" Value="Red" />
-                                            <Setter TargetName="EndInfo" Property="Visibility" Value="Visible" />
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-
-                        <!-- Totals/footer: stacked rows to prevent overlap -->
-                        <StackPanel Margin="6,8,6,0">
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <TextBlock Text="Hours worked:" VerticalAlignment="Center" />
-                                <TextBlock x:Name="TotalWorkedDataTextBlock" Text="0.00h" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="Black" MinWidth="72" TextAlignment="Left" />
-                            </StackPanel>
-
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <TextBlock Text="Target hours:" VerticalAlignment="Center" />
-                                <TextBox x:Name="ShiftTargetText" Width="80" Margin="8,0,0,0" LostFocus="ShiftTargetText_LostFocus" />
-                            </StackPanel>
-
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Delta:" VerticalAlignment="Center" />
-                                <TextBlock x:Name="TotalDeltaDataTextBlock" Text="0.00h" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="Delta = total worked - target hours. Positive = extra hours worked; negative = shortfall." />
-                            </StackPanel>
-                        </StackPanel>
-                    </StackPanel>
-                </DockPanel>
-            </GroupBox>
-
-            <StackPanel Orientation="Vertical" Margin="0,8,0,0">
+        <DockPanel Grid.Column="1" Margin="12,0,0,0">
+            <!-- Footer docked to bottom so action buttons remain visible -->
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Vertical" Margin="0,8,0,0">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <StackPanel>
                         <TextBlock Text="Account: Holiday" FontWeight="Bold" />
@@ -229,10 +109,132 @@
                     <Button Content="Reset" Margin="12,0,0,0" Click="ResetTIL_Click" />
                 </StackPanel>
 
-                <StackPanel Margin="8,18,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
                     <Button Content="View Log" Click="ViewLog_Click" />
+                    <!-- New: Export year colour map (PDF) -->
+                    <Button Content="Export year colour map (PDF)" Click="ExportYearMap_Click" Margin="6,0,0,0" />
                 </StackPanel>
             </StackPanel>
-        </StackPanel>
-    </Grid>
-</Window>
+
+            <!-- Main content scrolls if it grows so footer stays visible -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- Details header and selected date on same line -->
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <TextBlock Text="Details" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                        <TextBlock x:Name="SelectedDateLabel" Text="" FontWeight="Normal" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="Gray" />
+                    </StackPanel>
+
+                    <Grid Margin="0,6,0,6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0">
+                            <TextBlock Text="Employment Position" />
+                            <ComboBox x:Name="PositionCombo" IsEditable="True" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="1" Margin="0,6,0,0">
+                            <TextBlock Text="Location" />
+                            <ComboBox x:Name="LocationCombo" IsEditable="True" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="2" Margin="0,6,0,0">
+                            <TextBlock Text="Day Type" />
+                            <ComboBox x:Name="DayTypeCombo" SelectionChanged="DayTypeCombo_SelectionChanged" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="Physical Location" />
+                            <ComboBox x:Name="PhysicalLocationCombo" IsEditable="True" Width="240"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="8,18,0,0">
+                            <Button Content="Save as Default" Click="SaveDefaults_Click" Width="110"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Templates" FontWeight="Bold" />
+                    <DockPanel Margin="0,4,0,8">
+                        <ListBox x:Name="TemplatesList" DisplayMemberPath="TemplateName" Height="80" DockPanel.Dock="Left" Width="280" MouseDoubleClick="TemplatesList_MouseDoubleClick" />
+                        <StackPanel Orientation="Vertical" DockPanel.Dock="Right" Margin="8,0,0,0">
+                            <Button Content="Edit" Click="TemplatesList_Edit_Click" Width="80" Margin="0,0,0,6" />
+                            <Button Content="Delete" Click="DeleteTemplate_Click" Width="80" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <GroupBox Header="Shifts" Margin="0,6,0,6">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,4">
+                                <Button Content="Add" Click="AddShift_Click" Margin="0,0,6,0" />
+                                <Button Content="Edit" Click="EditShift_Click" Margin="0,0,6,0" />
+                                <Button Content="Delete" Click="DeleteShift_Click" />
+                            </StackPanel>
+                            <StackPanel>
+                                <ListBox x:Name="ShiftsList" MouseDoubleClick="ShiftsList_MouseDoubleClick">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="4">
+                                                <StackPanel>
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock x:Name="StartText" FontWeight="Bold" Text="{Binding StartDisplay}" Foreground="Black" />
+                                                        <TextBlock Text=" " />
+                                                        <TextBlock x:Name="StartInfo" Text="&#x2139;" Foreground="DodgerBlue" Margin="6,0,0,0" Visibility="Collapsed" />
+                                                        <TextBlock Text=" - " Margin="6,0" />
+                                                        <TextBlock x:Name="EndText" FontWeight="Bold" Text="{Binding EndDisplay}" Foreground="Black" />
+                                                        <TextBlock Text=" " />
+                                                        <TextBlock x:Name="EndInfo" Text="&#x2139;" Foreground="DodgerBlue" Margin="6,0,0,0" Visibility="Collapsed" />
+                                                        <!-- worked hours for this shift -->
+                                                        <TextBlock Text="  " />
+                                                        <TextBlock Text="(" Foreground="Gray" />
+                                                        <TextBlock Text="{Binding Hours, StringFormat={}{0:0.##}h}" Foreground="Gray" />
+                                                        <TextBlock Text=")" Foreground="Gray" />
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Description}" FontStyle="Italic" FontSize="12" />
+                                                    <TextBlock Text="{Binding LunchDisplay}" FontSize="11" Foreground="Gray" />
+                                                    <TextBlock Text="{Binding DayModeDisplay}" FontSize="11" Foreground="Gray" />
+                                                </StackPanel>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding ManualStartOverride}" Value="True">
+                                                    <Setter TargetName="StartText" Property="Foreground" Value="Red" />
+                                                    <Setter TargetName="StartInfo" Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding ManualEndOverride}" Value="True">
+                                                    <Setter TargetName="EndText" Property="Foreground" Value="Red" />
+                                                    <Setter TargetName="EndInfo" Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <!-- Totals/footer: stacked rows to prevent overlap -->
+                                <StackPanel Margin="6,8,6,0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="Hours worked:" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="TotalWorkedDataTextBlock" Text="0.00h" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="Black" MinWidth="72" TextAlignment="Left" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="Target hours:" VerticalAlignment="Center" />
+                                        <TextBox x:Name="ShiftTargetText" Width="80" Margin="8,0,0,0" LostFocus="ShiftTargetText_LostFocus" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Delta:" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="TotalDeltaDataTextBlock" Text="0.00h" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="Delta = total worked - target hours. Positive = extra hours worked; negative = shortfall." />
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </DockPanel>
+                    </GroupBox>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+     </Grid>
+ </Window>

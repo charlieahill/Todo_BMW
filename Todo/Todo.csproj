@@ -12,4 +12,8 @@
     <Content Include="BMW_Task_Tracker_Monochrome_Flat.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="PdfSharpCore" Version="1.3.67" />
+  </ItemGroup>
+
 </Project>
