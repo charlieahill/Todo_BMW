@@ -472,6 +472,76 @@ namespace Todo
             return added;
         }
 
+        // New: Apply a template and also persist per-day overrides (position, location, physical location and target hours)
+        // This will iterate the template date range and for each applicable day (hours > 0) will upsert a DayOverride using the template's employment/location fields
+        public int ApplyTemplateWithOverrides(TimeTemplate t, bool overwriteExistingEvents = false, bool overwriteOverrides = true)
+        {
+            if (t == null) return 0;
+            int appliedDays = 0;
+            var end = (t.EndDate ?? DateTime.Today).Date;
+
+            // First, apply open/close events (this will respect overwriteExistingEvents)
+            var addedEvents = ApplyTemplate(t, overwriteExisting: overwriteExistingEvents);
+
+            // Then, for each day in the range, set per-day overrides (position/location/physical/targethours)
+            for (var d = t.StartDate.Date; d <= end; d = d.AddDays(1))
+            {
+                int idx = ((int)d.DayOfWeek + 6) % 7;
+                // skip days with 0 hours
+                if (t.HoursPerWeekday != null && t.HoursPerWeekday.Length == 7 && t.HoursPerWeekday[idx] == 0) continue;
+
+                // If overwriteOverrides is false and an override already exists, skip
+                var existing = _overrides.FirstOrDefault(o => o.Date.Date == d);
+                if (existing != null && !overwriteOverrides)
+                {
+                    // Still count if events were added for the date
+                    appliedDays++;
+                    continue;
+                }
+
+                try
+                {
+                    // Use EmploymentLocation as physical location by default
+                    var phys = !string.IsNullOrWhiteSpace(existing?.PhysicalLocation) ? existing.PhysicalLocation : t.EmploymentLocation;
+                    UpsertOverride(d, t.EmploymentPosition ?? string.Empty, t.EmploymentLocation ?? string.Empty, phys ?? string.Empty, t.HoursPerWeekday?[idx], null);
+
+                    // Also apply a synthetic shift using the template's standard times and lunch break.
+                    // If there are existing saved shifts for this date and overwriteExistingEvents is false, do not replace them.
+                    var savedShifts = _shifts.Where(s => s.Date.Date == d).ToList();
+                    if (!savedShifts.Any() || overwriteExistingEvents)
+                    {
+                        var openDt = d.Add(t.StandardStart);
+                        var closeDt = d.Add(t.StandardEnd);
+                        if (closeDt > openDt)
+                        {
+                            var shift = new Shift
+                            {
+                                Date = d,
+                                Start = t.StandardStart,
+                                End = t.StandardEnd,
+                                LunchBreak = t.LunchBreak,
+                                Description = "(from template)",
+                                ManualStartOverride = false,
+                                ManualEndOverride = false,
+                                DayMode = "auto"
+                            };
+                            // UpsertShiftsForDate will replace any existing shifts for that date
+                            UpsertShiftsForDate(d, new List<Shift> { shift });
+                        }
+                    }
+
+                    appliedDays++;
+                }
+                catch { }
+            }
+
+            // Save overrides file after batch operation
+            try { SaveOverrides(); } catch { }
+
+            // Return count of days for which overrides were applied (not number of events)
+            return appliedDays;
+        }
+
         public void AddAccountLogEntry(AccountLogEntry entry)
         {
             try

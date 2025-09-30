@@ -23,11 +23,6 @@
             <Button Content="Apply" Margin="12,0,0,0" Click="Apply_Click" />
         </StackPanel>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0">
-            <TextBlock Text="Template Name:" VerticalAlignment="Center" Margin="0,0,6,0" Width="110"/>
-            <TextBox x:Name="TemplateNameText" Width="360"/>
-        </StackPanel>
-
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
             <TextBlock Text="Employment Position:" VerticalAlignment="Center" Margin="0,0,6,0" Width="140"/>
             <TextBox x:Name="EmploymentPositionText" Width="330"/>

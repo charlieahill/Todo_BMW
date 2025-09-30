@@ -154,18 +154,9 @@
                             <ComboBox x:Name="PhysicalLocationCombo" IsEditable="True" Width="240"/>
                         </StackPanel>
                         <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="8,18,0,0">
-                            <Button Content="Save as Default" Click="SaveDefaults_Click" Width="110"/>
+                            <Button Content="Bulk apply" Click="SaveDefaults_Click" Width="110"/>
                         </StackPanel>
                     </StackPanel>
-
-                    <TextBlock Text="Templates" FontWeight="Bold" />
-                    <DockPanel Margin="0,4,0,8">
-                        <ListBox x:Name="TemplatesList" DisplayMemberPath="TemplateName" Height="80" DockPanel.Dock="Left" Width="280" MouseDoubleClick="TemplatesList_MouseDoubleClick" />
-                        <StackPanel Orientation="Vertical" DockPanel.Dock="Right" Margin="8,0,0,0">
-                            <Button Content="Edit" Click="TemplatesList_Edit_Click" Width="80" Margin="0,0,0,6" />
-                            <Button Content="Delete" Click="DeleteTemplate_Click" Width="80" />
-                        </StackPanel>
-                    </DockPanel>
 
                     <GroupBox Header="Shifts" Margin="0,6,0,6">
                         <DockPanel>

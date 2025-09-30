@@ -20,7 +20,6 @@ namespace Todo
 
             StartDatePicker.SelectedDate = Template.StartDate;
             EndDatePicker.SelectedDate = Template.EndDate;
-            TemplateNameText.Text = Template.TemplateName;
             EmploymentPositionText.Text = Template.EmploymentPosition;
             EmploymentLocationText.Text = Template.EmploymentLocation;
 
@@ -49,7 +48,6 @@ namespace Todo
             Template = t;
             StartDatePicker.SelectedDate = t.StartDate;
             EndDatePicker.SelectedDate = t.EndDate;
-            TemplateNameText.Text = t.TemplateName ?? t.JobDescription ?? string.Empty;
             EmploymentPositionText.Text = t.EmploymentPosition ?? string.Empty;
             EmploymentLocationText.Text = t.EmploymentLocation ?? string.Empty;
             if (t.HoursPerWeekday != null && t.HoursPerWeekday.Length == 7)
@@ -74,7 +72,7 @@ namespace Todo
         private bool ValidateInputs(out string msg)
         {
             msg = null;
-            if (string.IsNullOrWhiteSpace(TemplateNameText.Text)) { msg = "Please enter a template name."; return false; }
+            // Template name removed; no longer required
             if (!(OngoingCheck.IsChecked == true))
             {
                 if (EndDatePicker.SelectedDate.HasValue && StartDatePicker.SelectedDate.HasValue && EndDatePicker.SelectedDate.Value.Date < StartDatePicker.SelectedDate.Value.Date)
@@ -103,9 +101,12 @@ namespace Todo
             if (!ValidateInputs(out var err)) { MessageBox.Show(err, "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
             Template.StartDate = StartDatePicker.SelectedDate ?? DateTime.Today;
             Template.EndDate = (OngoingCheck.IsChecked == true) ? (DateTime?)null : EndDatePicker.SelectedDate;
-            Template.TemplateName = TemplateNameText.Text ?? string.Empty;
             Template.EmploymentPosition = EmploymentPositionText.Text ?? string.Empty;
             Template.EmploymentLocation = EmploymentLocationText.Text ?? string.Empty;
+            Template.TemplateName = string.IsNullOrWhiteSpace(Template.EmploymentPosition) && string.IsNullOrWhiteSpace(Template.EmploymentLocation)
+                ? "Template"
+                : $"{Template.EmploymentPosition} ({Template.EmploymentLocation})";
+
             double[] arr = new double[7];
             double.TryParse(Mon.Text, out arr[0]);
             double.TryParse(Tue.Text, out arr[1]);
@@ -166,9 +167,13 @@ namespace Todo
                 if (!ValidateInputs(out var err)) { MessageBox.Show(err, "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
                 Template.StartDate = StartDatePicker.SelectedDate ?? DateTime.Today;
                 Template.EndDate = (OngoingCheck.IsChecked == true) ? (DateTime?)null : EndDatePicker.SelectedDate;
-                Template.TemplateName = TemplateNameText.Text ?? string.Empty;
+                // Generate template title from employment fields since title field removed
                 Template.EmploymentPosition = EmploymentPositionText.Text ?? string.Empty;
                 Template.EmploymentLocation = EmploymentLocationText.Text ?? string.Empty;
+                Template.TemplateName = string.IsNullOrWhiteSpace(Template.EmploymentPosition) && string.IsNullOrWhiteSpace(Template.EmploymentLocation)
+                    ? "Template"
+                    : $"{Template.EmploymentPosition} ({Template.EmploymentLocation})";
+
                 double[] arr = new double[7];
                 double.TryParse(Mon.Text, out arr[0]);
                 double.TryParse(Tue.Text, out arr[1]);

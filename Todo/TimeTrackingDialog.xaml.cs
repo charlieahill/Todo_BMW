@@ -129,61 +129,13 @@ namespace Todo
 
         private void LoadTemplates()
         {
-            TemplatesList.ItemsSource = TimeTrackingService.Instance.GetTemplates();
-            // refresh combo lists because templates can provide known positions/locations
+            // Previously populated a ListBox of templates. Templates UI removed; keep templates loaded into combo lists only.
+            // Refresh combo lists because templates can provide known positions/locations
             UpdateComboLists();
         }
 
         // Re-add missing handlers referenced by XAML
-        private void TemplatesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-        {
-            try
-            {
-                if (TemplatesList.SelectedItem is TimeTemplate t)
-                {
-                    var dlg = new TimeTemplateDialog(t) { Owner = this };
-                    if (dlg.ShowDialog() == true)
-                    {
-                        TimeTrackingService.Instance.UpsertTemplate(dlg.Template);
-                        LoadTemplates();
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private void TemplatesList_Edit_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (TemplatesList.SelectedItem is TimeTemplate t)
-                {
-                    var dlg = new TimeTemplateDialog(t) { Owner = this };
-                    if (dlg.ShowDialog() == true)
-                    {
-                        TimeTrackingService.Instance.UpsertTemplate(dlg.Template);
-                        LoadTemplates();
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private void DeleteTemplate_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (TemplatesList.SelectedItem is TimeTemplate t)
-                {
-                    if (MessageBox.Show($"Delete template '{t.TemplateName}'?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-                    {
-                        TimeTrackingService.Instance.RemoveTemplate(t.Id);
-                        LoadTemplates();
-                    }
-                }
-            }
-            catch { }
-        }
+        // Removed TemplatesList MouseDoubleClick/Edit/Delete handlers because templates list was removed from UI.
 
         private void UpdateComboLists()
         {
@@ -555,7 +507,7 @@ namespace Todo
 
                 // populate right side details for selected day (basic)
                 // prefer persisted overrides if present
-                PositionCombo.Text = !string.IsNullOrWhiteSpace(vm.PositionOverride) ? vm.PositionOverride : vm.Template?.JobDescription ?? "";
+                PositionCombo.Text = !string.IsNullOrWhiteSpace(vm.PositionOverride) ? vm.PositionOverride : (vm.Template?.JobDescription ?? "");
                 LocationCombo.Text = !string.IsNullOrWhiteSpace(vm.LocationOverride) ? vm.LocationOverride : vm.Template?.Location ?? "";
                 // default physical location to physical override, otherwise location override or template location
                 PhysicalLocationCombo.Text = !string.IsNullOrWhiteSpace(vm.PhysicalLocationOverride) ? vm.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(vm.LocationOverride) ? vm.LocationOverride : vm.Template?.Location ?? "");
@@ -740,9 +692,19 @@ namespace Todo
                 var dlg = new TimeTemplateDialog() { Owner = this };
                 if (dlg.ShowDialog() == true)
                 {
+                    // Save template
                     TimeTrackingService.Instance.UpsertTemplate(dlg.Template);
                     LoadTemplates();
-                    MessageBox.Show("Template saved.", "Saved", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                    // Directly apply the template across its date range, overwriting existing events and overrides
+                    int applied = TimeTrackingService.Instance.ApplyTemplateWithOverrides(dlg.Template, overwriteExistingEvents: true, overwriteOverrides: true);
+                    MessageBox.Show($"Bulk applied to {applied} day(s).", "Bulk apply", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                    // Refresh UI state
+                    PopulateDaysForCurrentMonth();
+                    RecomputeCumulatives();
+                    UpdateAccountsDisplay();
+                    UpdateComboLists();
                 }
             }
             catch (Exception ex)
@@ -1107,6 +1069,14 @@ namespace Todo
                         DrawYearGridToGraphics(g, days, year, colorByPhysical: true);
                     }
 
+                    // page 3: overtime (delta) jet colour map
+                    var p3 = doc.AddPage();
+                    p3.Size = PdfSharpCore.PageSize.A4;
+                    using (var g = XGraphics.FromPdfPage(p3))
+                    {
+                        DrawOvertimeGridToGraphics(g, days, year);
+                    }
+
                     using (var fs = File.OpenWrite(dlg.FileName))
                     {
                         doc.Save(fs);
@@ -1285,6 +1255,161 @@ namespace Todo
                                .GroupBy(s => s).OrderByDescending(gp => gp.Count()).Select(gp => gp.Key).ToList();
                 return locs;
             }
+        }
+
+        // Third page: draw overtime (delta) map using a 'jet' style colormap
+        private void DrawOvertimeGridToGraphics(XGraphics g, List<DayViewModel> days, int year)
+        {
+            double margin = 30;
+            double pageWidth = g.PageSize.Width;
+            double pageHeight = g.PageSize.Height;
+            double contentWidth = pageWidth - (margin * 2);
+            
+            var headerFont = new XFont("Arial", 16, XFontStyle.Bold);
+            var subFont = new XFont("Arial", 10, XFontStyle.Regular);
+
+            // compute deltas
+            // Fixed scale +/- 8 hours as requested
+            double min = -8.0;
+            double max = 8.0;
+
+            double totalOver = days.Where(d => d.Delta.HasValue && d.Delta.Value > 0).Sum(d => d.Delta.Value);
+            int countOver = days.Count(d => d.Delta.HasValue && d.Delta.Value > 0);
+
+            g.DrawString("Overtime (Delta) map - " + year.ToString(), headerFont, XBrushes.Black, new XRect(margin, 10, contentWidth, 24), XStringFormats.TopLeft);
+            g.DrawString($"Total overtime: {totalOver:0.##}h across {countOver} day(s)", subFont, XBrushes.Black, new XRect(margin, 34, contentWidth, 20), XStringFormats.TopLeft);
+
+            // layout months grid (3x4)
+            int cols = 3; int rows = 4; double gap = 8;
+            double monthWidth = (contentWidth - (gap * (cols - 1))) / cols;
+            double legendHeight = 70;
+            double monthGridAvailableHeight = pageHeight - 80 - legendHeight - (gap * (rows - 1));
+            double monthHeight = monthGridAvailableHeight / rows;
+
+            for (int m = 1; m <= 12; m++)
+            {
+                int monthIndex = m - 1;
+                int col = monthIndex % cols;
+                int row = monthIndex / cols;
+                double x = margin + col * (monthWidth + gap);
+                double y = 60 + row * (monthHeight + gap);
+
+                // Draw similar month grid but color by delta
+                DrawSingleMonthOvertime(g, days, year, m, new XRect(x, y, monthWidth, monthHeight), min, max);
+            }
+
+            // draw horizontal colorbar legend at bottom
+            double legendY = pageHeight - 60;
+            double legendX = margin + 20;
+            double legendW = contentWidth - 40;
+            double legendH = 14;
+            int steps = Math.Max(4, (int)legendW); // ensure at least a few steps
+            for (int i = 0; i < steps; i++)
+            {
+                double t = (double)i / Math.Max(1, steps - 1);
+                double val = min + t * (max - min);
+                var c = JetColor(val, min, max);
+                var brush = new XSolidBrush(c);
+                g.DrawRectangle(brush, legendX + i, legendY, 1, legendH);
+            }
+            // draw labels min 0 max
+            var lblFont = new XFont("Arial", 9, XFontStyle.Regular);
+            g.DrawString(min.ToString("0.##") + "h", lblFont, XBrushes.Black, new XPoint(legendX, legendY + legendH + 6));
+            // safe position for zero marker
+            double zeroPos = legendX;
+            if (max > min) zeroPos = legendX + legendW * ((0 - min) / (max - min));
+            g.DrawString("0h", lblFont, XBrushes.Black, new XPoint(zeroPos - g.MeasureString("0h", lblFont).Width/2, legendY + legendH + 6));
+            g.DrawString(max.ToString("0.##") + "h", lblFont, XBrushes.Black, new XPoint(legendX + legendW - g.MeasureString(max.ToString("0.##") + "h", lblFont).Width, legendY + legendH + 6));
+        }
+
+        private void DrawSingleMonthOvertime(XGraphics g, List<DayViewModel> days, int year, int month, XRect rect, double min, double max)
+        {
+            var monthName = CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(month);
+            var titleFont = new XFont("Arial", 10, XFontStyle.Bold);
+            g.DrawString(monthName + " " + year.ToString(), titleFont, XBrushes.Black, new XPoint(rect.X + 4, rect.Y + 12));
+
+            double top = rect.Y + 20;
+            double left = rect.X + 2;
+            double gridWidth = rect.Width - 4;
+            double gridHeight = rect.Height - 24;
+            int cols = 7; int rows = 6;
+            double cellW = gridWidth / cols;
+            double cellH = gridHeight / rows;
+
+            var first = new DateTime(year, month, 1);
+            int leading = (int)first.DayOfWeek - 1; if (leading < 0) leading += 7;
+
+            for (int i = 0; i < rows * cols; i++)
+            {
+                int dayNum = i - leading + 1;
+                double cx = left + (i % cols) * cellW;
+                double cy = top + (i / cols) * cellH;
+                var cellRect = new XRect(cx, cy, cellW - 1, cellH - 1);
+
+                if (dayNum >= 1 && dayNum <= DateTime.DaysInMonth(year, month))
+                {
+                    var d = days.FirstOrDefault(dd => dd.Date.Year == year && dd.Date.Month == month && dd.Date.Day == dayNum);
+                    if (d != null && d.Delta.HasValue)
+                    {
+                        var jc = JetColor(d.Delta.Value, min, max);
+                        g.DrawRectangle(new XSolidBrush(jc), cellRect);
+                    }
+                    else if (d != null)
+                    {
+                        g.DrawRectangle(XBrushes.White, cellRect);
+                    }
+                    else
+                    {
+                        g.DrawRectangle(XBrushes.LightGray, cellRect);
+                    }
+
+                    var numFont = new XFont("Arial", 7, XFontStyle.Regular);
+                    g.DrawString(dayNum.ToString(), numFont, XBrushes.Black, new XPoint(cellRect.X + 3, cellRect.Y + 9));
+                }
+                else
+                {
+                    g.DrawRectangle(XBrushes.LightGray, cellRect);
+                }
+            }
+
+            g.DrawRectangle(XPens.Black, rect.X, rect.Y, rect.Width, rect.Height);
+        }
+
+        // Map a value to a jet-like color between min and max. Returns XColor.
+        private XColor JetColor(double value, double min, double max)
+        {
+            // Values outside [min,max] should be rendered in black
+            if (value < min || value > max)
+                return XColor.FromArgb(255, 0, 0, 0);
+
+            double t = 0.5; // normalized
+            if (max > min)
+                t = (value - min) / (max - min);
+            // clamp
+            t = Math.Min(1, Math.Max(0, t));
+
+            double r = 0, g = 0, b = 0;
+            if (t < 0.25)
+            {
+                r = 0; g = 4 * t; b = 1;
+            }
+            else if (t < 0.5)
+            {
+                r = 0; g = 1; b = 1 - 4 * (t - 0.25);
+            }
+            else if (t < 0.75)
+            {
+                r = 4 * (t - 0.5); g = 1; b = 0;
+            }
+            else
+            {
+                r = 1; g = 1 - 4 * (t - 0.75); b = 0;
+            }
+
+            byte R = (byte)(Math.Min(1, Math.Max(0, r)) * 255);
+            byte G = (byte)(Math.Min(1, Math.Max(0, g)) * 255);
+            byte B = (byte)(Math.Min(1, Math.Max(0, b)) * 255);
+            return XColor.FromArgb(255, R, G, B);
         }
     }
 
