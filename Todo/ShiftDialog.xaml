@@ -18,7 +18,8 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="2*" />
                 </Grid.ColumnDefinitions>
-                <ListView x:Name="StartList" Grid.Column="0" Height="260" SelectionChanged="StartList_SelectionChanged" HorizontalAlignment="Stretch" />
+                <ListView x:Name="StartList" Grid.Column="0" Height="260" SelectionChanged="StartList_SelectionChanged" HorizontalAlignment="Stretch"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
                 <StackPanel Grid.Column="1" Margin="8,0,0,0">
                     <TextBlock Text="Or enter time (HH:MM):" />
                     <StackPanel Orientation="Horizontal">
@@ -37,7 +38,8 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="2*" />
                 </Grid.ColumnDefinitions>
-                <ListView x:Name="EndList" Grid.Column="0" Height="260" SelectionChanged="EndList_SelectionChanged" HorizontalAlignment="Stretch" />
+                <ListView x:Name="EndList" Grid.Column="0" Height="260" SelectionChanged="EndList_SelectionChanged" HorizontalAlignment="Stretch"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
                 <StackPanel Grid.Column="1" Margin="8,0,0,0">
                     <TextBlock Text="Or enter time (HH:MM):" />
                     <StackPanel Orientation="Horizontal">

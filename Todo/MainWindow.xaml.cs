@@ -57,6 +57,8 @@ namespace Todo
                 // Ensure data directory exists
                 try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
                 System.IO.File.AppendAllText(StartupLogFile, line);
+                // Also append to the general debug log so startup checks are visible in the main log
+                try { System.IO.File.AppendAllText(DebugLogFile, line); } catch { }
             }
             catch { /* don't break startup for logging failures */ }
         }
@@ -71,6 +73,14 @@ namespace Todo
 
             // Ensure data directory exists before any IO
             try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+
+            // Clear existing logs on application start so each run begins with fresh logs
+            try
+            {
+                try { File.WriteAllText(StartupLogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Startup log cleared\n"); } catch { }
+                try { File.WriteAllText(DebugLogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Debug log cleared\n"); } catch { }
+            }
+            catch { }
 
             LoadTasks();
 
@@ -645,11 +655,16 @@ namespace Todo
                 }
 
                 // update current date storage in memory only (don't persist to disk here)
-                var key = DateKey(_currentDate);
-                AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
-                    .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
-                    .ToList();
-                // Removed immediate SaveTasks();
+                // Only update AllTasks when we're actually in the Today view. When in filtered modes
+                // (People/Meetings/All) TaskList contains a cross-date subset and must not be written
+                // back into a single date bucket which would clobber stored tasks for that date.
+                if (_mode == ViewMode.Today)
+                {
+                    var key = DateKey(_currentDate);
+                    AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
+                        .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
+                        .ToList();
+                }
             }
             _placeholderJustFocused = false;
             UpdateTitle();
