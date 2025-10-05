@@ -7,7 +7,7 @@ namespace Todo
         public DateTime Date { get; set; }
         public TimeSpan Start { get; set; }
         public TimeSpan End { get; set; }
-        public string Description { get; set; }
+        public string Description { get; set; } = string.Empty;
         // Subtract lunch break from total hours
         public double Hours => Math.Max(0, (End - Start - LunchBreak).TotalHours);
 
@@ -15,6 +15,11 @@ namespace Todo
         public string StartDisplay => Start.ToString(@"hh\:mm");
         public string EndDisplay => End.ToString(@"hh\:mm");
         public string Display => string.Format("{0} - {1} ({2:0.00}h) {3}", StartDisplay, EndDisplay, Hours, Description);
+
+        // Additional helpers for hh:mm display
+        public TimeSpan WorkedTime => (End > Start) ? (End - Start - LunchBreak) : TimeSpan.Zero;
+        public string WorkedHhmm => (WorkedTime < TimeSpan.Zero ? TimeSpan.Zero : WorkedTime).ToString(@"hh\:mm");
+        public string LunchHhmm => LunchBreak.ToString(@"hh\:mm");
 
         // Manual override flags
         public bool ManualStartOverride { get; set; }

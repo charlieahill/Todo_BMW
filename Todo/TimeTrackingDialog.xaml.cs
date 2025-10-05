@@ -520,7 +520,7 @@ namespace Todo
                         quickTotal = vm.Shifts.Sum(s => s.Hours);
                     else if (vm.Worked.HasValue)
                         quickTotal = vm.Worked.Value;
-                    TotalWorkedDataTextBlock.Text = quickTotal.ToString("0.##") + "h";
+                    TotalWorkedDataTextBlock.Text = FormatHoursAsHHmm(quickTotal);
                 }
                 catch { }
                  DayTypeCombo.SelectedItem = vm.DayType.ToString();
@@ -796,6 +796,7 @@ namespace Todo
                         PopulateDaysForCurrentMonth();
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
+                        UpdateShiftTotalsDisplay();
 
                         // also explicitly set account textblocks from service to ensure update
                         try
@@ -894,6 +895,7 @@ namespace Todo
                         PopulateDaysForCurrentMonth();
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
+                        UpdateShiftTotalsDisplay();
 
                         // explicitly update account textblocks
                         try
@@ -935,8 +937,8 @@ namespace Todo
             {
                 if (_activeDay == null)
                 {
-                    if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw) tw.Text = "0.00h";
-                    if (this.FindName("TotalDeltaDataTextBlock") is TextBlock td) td.Text = "0.00h";
+                    if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw) tw.Text = "00:00";
+                    if (this.FindName("TotalDeltaDataTextBlock") is TextBlock td) td.Text = "00:00";
                     if (this.FindName("ShiftTargetText") is TextBox st) st.Text = string.Empty;
                     return;
                 }
@@ -958,9 +960,9 @@ namespace Todo
                 double delta = totalWorked - (target > 0 ? target : 0);
 
                 if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw2)
-                    tw2.Text = totalWorked.ToString("0.##") + "h";
+                    tw2.Text = FormatHoursAsHHmm(totalWorked);
                 if (this.FindName("TotalDeltaDataTextBlock") is TextBlock td2)
-                    td2.Text = delta.ToString("0.##") + "h";
+                    td2.Text = FormatHoursAsHHmm(delta);
                 if (this.FindName("ShiftTargetText") is TextBox st2)
                     st2.Text = target > 0 ? target.ToString("0.##") : string.Empty;
             }
@@ -989,7 +991,7 @@ namespace Todo
                 if (this.FindName("AccountHolidayValue") is TextBlock ah)
                     ah.Text = holidayVal.ToString("0.##") + " days";
                 if (this.FindName("AccountTILValue") is TextBlock til)
-                    til.Text = tilVal.ToString("0.##") + " hours";
+                    til.Text = FormatHoursAsHHmm(tilVal);
 
                  // Also refresh days list to show cumulative values
                  DaysList.Items.Refresh();
@@ -1411,6 +1413,19 @@ namespace Todo
             byte B = (byte)(Math.Min(1, Math.Max(0, b)) * 255);
             return XColor.FromArgb(255, R, G, B);
         }
+
+        // Format a double hours value as HH:MM (zero-padded). Handles negative and fractional minutes properly.
+        public static string FormatHoursAsHHmm(double hours)
+        {
+            if (double.IsNaN(hours) || double.IsInfinity(hours)) return "00:00";
+            var negative = hours < 0;
+            var abs = Math.Abs(hours);
+            int h = (int)Math.Floor(abs);
+            int m = (int)Math.Round((abs - h) * 60);
+            if (m == 60) { h += 1; m = 0; }
+            var s = $"{h:00}:{m:00}";
+            return negative ? "-" + s : s;
+        }
     }
 
     // Simple settings for window position/size
@@ -1428,9 +1443,7 @@ namespace Todo
         public DateTime Date { get; }
         public string DateString => Date.ToString("dd/MM/yyyy");
         public string Weekday => Date.ToString("dddd");
-        // Backing original worked hours from summary (may not account for per-shift lunch breaks)
         private double? _workedFromSummary;
-        // Compute Worked from persisted shifts when available so lunch breaks are respected
         public double? Worked
         {
             get
@@ -1445,30 +1458,21 @@ namespace Todo
             }
         }
         public double Standard { get; }
-        // cumulative account balances as of end of this day
         public double CumulativeTIL { get; set; }
         public double CumulativeHoliday { get; set; }
-        public string CumulativeTILDisplay => CumulativeTIL.ToString("0.##") + "h";
+        public string CumulativeTILDisplay => TimeTrackingDialog.FormatHoursAsHHmm(CumulativeTIL);
         public string CumulativeHolidayDisplay => CumulativeHoliday.ToString("0.##") + "d";
         public double? Delta => Worked.HasValue ? (Worked.Value - Standard) : (double?)null;
-        public string WorkedDisplay => Worked.HasValue ? Worked.Value.ToString("0.00") : "0:00";
+        public string WorkedDisplay => Worked.HasValue ? TimeTrackingDialog.FormatHoursAsHHmm(Worked.Value) : "00:00";
         public string StandardDisplay => Standard.ToString("0.00");
         public DayType DayType { get; private set; }
         public TimeTemplate Template { get; }
-
-        // New properties to indicate today and selection for XAML triggers
         public bool IsToday { get; set; }
         public bool IsSelected { get; set; }
-
-        // Per-day overrides (user edits) to preserve values while dialog is open
         public string PositionOverride { get; set; }
         public string LocationOverride { get; set; }
         public string PhysicalLocationOverride { get; set; }
-
-        // Per-day shifts (persisted)
         public List<Shift> Shifts { get; set; }
-
-        // Target hours for the day (default from template, editable in dialog)
         public double? TargetHours { get; set; }
 
         public DayViewModel(DaySummary s)
@@ -1477,7 +1481,6 @@ namespace Todo
             _workedFromSummary = s.WorkedHours;
             Standard = s.StandardHours;
             Template = TimeTrackingService.Instance.GetTemplates().FirstOrDefault(t => t.AppliesTo(s.Date));
-            // determine type: weekend = Saturday or Sunday
             if (Date.DayOfWeek == DayOfWeek.Saturday || Date.DayOfWeek == DayOfWeek.Sunday)
                 DayType = DayType.Weekend;
             else
@@ -1490,7 +1493,6 @@ namespace Todo
             LocationOverride = null;
             PhysicalLocationOverride = null;
 
-            // load persisted shifts
             var saved = TimeTrackingService.Instance.GetShiftsForDate(Date).ToList();
             if (saved != null && saved.Count > 0)
             {
@@ -1501,19 +1503,13 @@ namespace Todo
                 Shifts = new List<Shift>();
             }
 
-            // If no persisted shifts but DaySummary contains open/close times, create a synthetic shift so the UI shows what was used to compute WorkedHours
             if ((Shifts == null || Shifts.Count == 0) && s.OpenTime.HasValue && s.CloseTime.HasValue)
             {
                 try
                 {
                     var start = s.OpenTime.Value;
                     var end = s.CloseTime.Value;
-                    // ensure valid ordering
-                    if (end <= start)
-                    {
-                        // if close <= open, treat worked as 0 and do not add
-                    }
-                    else
+                    if (end > start)
                     {
                         var synthetic = new Shift
                         {
@@ -1535,7 +1531,6 @@ namespace Todo
 
         public void SetDayType(DayType dt) => DayType = dt;
 
-        // Computed background brush used by month grid. Respects global toggle in TimeTrackingDialog.ColorByPhysicalLocation
         public Brush BackgroundBrush
         {
             get
@@ -1549,15 +1544,13 @@ namespace Todo
                             return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFFFFFFF"));
 
                         int h = key.GetHashCode();
-                        // produce a pleasant pastel color
                         byte r = (byte)(80 + (Math.Abs(h) % 176));
-                        byte g = (byte)(80 + (Math.Abs(h / 7) % 176));
+                        byte gcol = (byte)(80 + (Math.Abs(h / 7) % 176));
                         byte b = (byte)(80 + (Math.Abs(h / 13) % 176));
-                        return new SolidColorBrush(Color.FromRgb(r, g, b));
+                        return new SolidColorBrush(Color.FromRgb(r, gcol, b));
                     }
                     else
                     {
-                        // colour by day type using existing palette
                         switch (DayType)
                         {
                             case DayType.WorkingDay: return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFDFF0D8"));

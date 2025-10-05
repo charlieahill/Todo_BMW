@@ -104,7 +104,7 @@
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
                     <StackPanel>
                         <TextBlock Text="Account: Time in Lieu" FontWeight="Bold" />
-                        <TextBlock x:Name="AccountTILValue" Text="0.00 hours" />
+                        <TextBlock x:Name="AccountTILValue" Text="00:00" />
                     </StackPanel>
                     <Button Content="Reset" Margin="12,0,0,0" Click="ResetTIL_Click" />
                 </StackPanel>
@@ -179,14 +179,17 @@
                                                         <TextBlock x:Name="EndText" FontWeight="Bold" Text="{Binding EndDisplay}" Foreground="Black" />
                                                         <TextBlock Text=" " />
                                                         <TextBlock x:Name="EndInfo" Text="&#x2139;" Foreground="DodgerBlue" Margin="6,0,0,0" Visibility="Collapsed" />
-                                                        <!-- worked hours for this shift -->
+                                                        <!-- worked and lunch for this shift -->
                                                         <TextBlock Text="  " />
                                                         <TextBlock Text="(" Foreground="Gray" />
-                                                        <TextBlock Text="{Binding Hours, StringFormat={}{0:0.##}h}" Foreground="Gray" />
+                                                        <TextBlock Text="Worked " Foreground="Gray" />
+                                                        <TextBlock Text="{Binding WorkedHhmm}" Foreground="Gray" />
+                                                        <TextBlock Text=", " Foreground="Gray" />
+                                                        <TextBlock Text="Lunch " Foreground="Gray" />
+                                                        <TextBlock Text="{Binding LunchHhmm}" Foreground="Gray" />
                                                         <TextBlock Text=")" Foreground="Gray" />
                                                     </StackPanel>
                                                     <TextBlock Text="{Binding Description}" FontStyle="Italic" FontSize="12" />
-                                                    <TextBlock Text="{Binding LunchDisplay}" FontSize="11" Foreground="Gray" />
                                                     <TextBlock Text="{Binding DayModeDisplay}" FontSize="11" Foreground="Gray" />
                                                 </StackPanel>
                                             </Border>
@@ -208,7 +211,7 @@
                                 <StackPanel Margin="6,8,6,0">
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="Hours worked:" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="TotalWorkedDataTextBlock" Text="0.00h" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="Black" MinWidth="72" TextAlignment="Left" />
+                                        <TextBlock x:Name="TotalWorkedDataTextBlock" Text="00:00" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="Black" MinWidth="72" TextAlignment="Left" />
                                     </StackPanel>
 
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
@@ -218,7 +221,7 @@
 
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="Delta:" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="TotalDeltaDataTextBlock" Text="0.00h" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="Delta = total worked - target hours. Positive = extra hours worked; negative = shortfall." />
+                                        <TextBlock x:Name="TotalDeltaDataTextBlock" Text="00:00" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="Delta = total worked - target hours. Positive = extra hours worked; negative = shortfall." />
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>

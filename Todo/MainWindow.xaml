@@ -32,7 +32,14 @@
                             </Grid.RowDefinitions>
 
                             <!-- Up Arrow -->
-                            <RepeatButton x:Name="PART_LineUpButton" Grid.Row="0" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0">
+                            <RepeatButton x:Name="PART_LineUpButton" Grid.Row="0" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0" OverridesDefaultStyle="True">
+                                <RepeatButton.Template>
+                                    <ControlTemplate TargetType="RepeatButton">
+                                        <Border Background="Transparent" BorderThickness="0">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </RepeatButton.Template>
                                 <Viewbox Width="10" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Canvas Width="8" Height="8">
                                         <!-- Two stroked lines forming the upper edges of a caret (pointing up) -->
@@ -49,7 +56,13 @@
                             <!-- Track with Thumb -->
                             <Track x:Name="PART_Track" Grid.Row="1" IsDirectionReversed="true">
                                 <Track.DecreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageUpCommand" Background="Transparent" BorderThickness="0"/>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Background="Transparent" BorderThickness="0" Focusable="False" IsTabStop="False" OverridesDefaultStyle="True">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" BorderThickness="0"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
                                 </Track.DecreaseRepeatButton>
                                 <Track.Thumb>
                                     <!-- Do NOT set an explicit Height on the Thumb. Track will size it; the inner Rectangle will stretch vertically to fill the Thumb. -->
@@ -66,12 +79,25 @@
                                     </Thumb>
                                 </Track.Thumb>
                                 <Track.IncreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageDownCommand" Background="Transparent" BorderThickness="0"/>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Background="Transparent" BorderThickness="0" Focusable="False" IsTabStop="False" OverridesDefaultStyle="True">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" BorderThickness="0"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
                                 </Track.IncreaseRepeatButton>
                             </Track>
 
                             <!-- Down Arrow -->
-                            <RepeatButton x:Name="PART_LineDownButton" Grid.Row="2" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0">
+                            <RepeatButton x:Name="PART_LineDownButton" Grid.Row="2" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0" OverridesDefaultStyle="True">
+                                <RepeatButton.Template>
+                                    <ControlTemplate TargetType="RepeatButton">
+                                        <Border Background="Transparent" BorderThickness="0">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </RepeatButton.Template>
                                 <Viewbox Width="10" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Canvas Width="8" Height="8">
                                         <!-- Two stroked lines forming the lower edges of a caret (pointing down) -->
@@ -495,7 +521,14 @@
                                     </Grid.RowDefinitions>
 
                                     <!-- Up Arrow -->
-                                    <RepeatButton x:Name="PART_LineUpButton" Grid.Row="0" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0">
+                                    <RepeatButton x:Name="PART_LineUpButton" Grid.Row="0" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0" OverridesDefaultStyle="True">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" BorderThickness="0">
+                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
                                         <Viewbox Width="10" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center">
                                             <Canvas Width="8" Height="8">
                                                 <!-- Two stroked lines forming the upper edges of a caret (pointing up) -->
@@ -512,7 +545,13 @@
                                     <!-- Track with Thumb -->
                                     <Track x:Name="PART_Track" Grid.Row="1" IsDirectionReversed="true">
                                         <Track.DecreaseRepeatButton>
-                                            <RepeatButton Command="ScrollBar.PageUpCommand" Background="Transparent" BorderThickness="0"/>
+                                            <RepeatButton Command="ScrollBar.PageUpCommand" Background="Transparent" BorderThickness="0" Focusable="False" IsTabStop="False" OverridesDefaultStyle="True">
+                                                <RepeatButton.Template>
+                                                    <ControlTemplate TargetType="RepeatButton">
+                                                        <Border Background="Transparent" BorderThickness="0"/>
+                                                    </ControlTemplate>
+                                                </RepeatButton.Template>
+                                            </RepeatButton>
                                         </Track.DecreaseRepeatButton>
                                         <Track.Thumb>
                                             <!-- Let the Track determine Thumb size so it maps to scroll extent. Rectangle stretches inside to fill it. -->
@@ -529,12 +568,25 @@
                                             </Thumb>
                                         </Track.Thumb>
                                         <Track.IncreaseRepeatButton>
-                                            <RepeatButton Command="ScrollBar.PageDownCommand" Background="Transparent" BorderThickness="0"/>
+                                            <RepeatButton Command="ScrollBar.PageDownCommand" Background="Transparent" BorderThickness="0" Focusable="False" IsTabStop="False" OverridesDefaultStyle="True">
+                                                <RepeatButton.Template>
+                                                    <ControlTemplate TargetType="RepeatButton">
+                                                        <Border Background="Transparent" BorderThickness="0"/>
+                                                    </ControlTemplate>
+                                                </RepeatButton.Template>
+                                            </RepeatButton>
                                         </Track.IncreaseRepeatButton>
                                     </Track>
 
                                     <!-- Down Arrow -->
-                                    <RepeatButton x:Name="PART_LineDownButton" Grid.Row="2" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0">
+                                    <RepeatButton x:Name="PART_LineDownButton" Grid.Row="2" Height="20" Focusable="False" IsTabStop="False" Background="Transparent" BorderThickness="0" OverridesDefaultStyle="True">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" BorderThickness="0">
+                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
                                         <Viewbox Width="10" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center">
                                             <Canvas Width="8" Height="8">
                                                 <!-- Two stroked lines forming the lower edges of a caret (pointing down) -->

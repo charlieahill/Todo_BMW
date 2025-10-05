@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input;
 
 namespace Todo
 {
@@ -152,8 +153,8 @@ namespace Todo
             if (startManualInfo != null) startManualInfo.Visibility = _startManual ? Visibility.Visible : Visibility.Collapsed;
             if (endManualInfo != null) endManualInfo.Visibility = _endManual ? Visibility.Visible : Visibility.Collapsed;
 
-            // set lunch and daymode if Shift has values
-            if (lunchText != null) lunchText.Text = s != null && s.LunchBreak != null && s.LunchBreak != TimeSpan.Zero ? s.LunchBreak.ToString(@"hh\:mm") : TimeSpan.FromHours(1).ToString(@"hh\:mm");
+            // Set lunch and day mode from Shift values. Always show the saved LunchBreak value (even 00:00).
+            if (lunchText != null) lunchText.Text = Shift.LunchBreak.ToString(@"hh\:mm");
             if (dayModeCombo != null && s != null)
             {
                 var mode = s.DayMode ?? "Regular Day";
@@ -289,6 +290,21 @@ namespace Todo
         {
             this.DialogResult = false;
             this.Close();
+        }
+
+        // Handle Enter to accept and Escape to cancel anywhere in the window
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                Ok_Click(this, new RoutedEventArgs());
+            }
+            else if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Cancel_Click(this, new RoutedEventArgs());
+            }
         }
 
         private class TimeItem
