@@ -57,6 +57,8 @@ namespace Todo
                 // Ensure data directory exists
                 try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
                 System.IO.File.AppendAllText(StartupLogFile, line);
+                // Also append to the general debug log so startup checks are visible in the main log
+                try { System.IO.File.AppendAllText(DebugLogFile, line); } catch { }
             }
             catch { /* don't break startup for logging failures */ }
         }
@@ -71,6 +73,14 @@ namespace Todo
 
             // Ensure data directory exists before any IO
             try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+
+            // Clear existing logs on application start so each run begins with fresh logs
+            try
+            {
+                try { File.WriteAllText(StartupLogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Startup log cleared\n"); } catch { }
+                try { File.WriteAllText(DebugLogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Debug log cleared\n"); } catch { }
+            }
+            catch { }
 
             LoadTasks();
 
@@ -143,6 +153,9 @@ namespace Todo
 
             // Update totals at startup
             UpdateTotals();
+
+            // Ensure Today search UI visibility for initial mode
+            try { if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Visible; } catch { }
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -445,6 +458,9 @@ namespace Todo
             UpdateTitle();
             UpdateJumpTodayIcon();
             // SaveCurrentDateTasks(); // Removed to prevent wiping out tasks on startup
+
+            // Apply or clear Today filter based on current mode
+            ApplyTodaySearchFilter();
         }
 
         private void UpdateJumpTodayIcon()
@@ -489,6 +505,9 @@ namespace Todo
 
             // Update totals whenever the view changes
             UpdateTotals();
+
+            // Refresh Today filter after list reloaded
+            ApplyTodaySearchFilter();
         }
 
         private void EnsureHasPlaceholder()
@@ -645,15 +664,23 @@ namespace Todo
                 }
 
                 // update current date storage in memory only (don't persist to disk here)
-                var key = DateKey(_currentDate);
-                AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
-                    .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
-                    .ToList();
-                // Removed immediate SaveTasks();
+                // Only update AllTasks when we're actually in the Today view. When in filtered modes
+                // (People/Meetings/All) TaskList contains a cross-date subset and must not be written
+                // back into a single date bucket which would clobber stored tasks for that date.
+                if (_mode == ViewMode.Today)
+                {
+                    var key = DateKey(_currentDate);
+                    AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
+                        .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
+                        .ToList();
+                }
             }
             _placeholderJustFocused = false;
             UpdateTitle();
             UpdateTotals();
+
+            // Re-apply filter since text changes could affect match
+            ApplyTodaySearchFilter();
         }
 
         private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
@@ -911,6 +938,8 @@ namespace Todo
             // hide people/meetings filter containers when exiting special modes
             if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
             if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+            // show today search container
+            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Visible;
             SetCurrentDate(_currentDate);
         }
 
@@ -932,7 +961,12 @@ namespace Todo
             _activeFilter = null;
             FilterPopup.IsOpen = false;
             CalendarPopup.IsOpen = false;
+            // show today search
+            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Visible;
+            // Clear Today search when returning to Today mode
+            ClearTodaySearchFilter();
             SetCurrentDate(DateTime.Today);
+            ApplyTodaySearchFilter();
         }
 
         private void PeopleButton_Click(object sender, RoutedEventArgs e)
@@ -949,6 +983,10 @@ namespace Todo
              if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
              // hide the meetings container when in people mode
              if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+             // hide today search when not in today mode
+             if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
+             // clear today filter when leaving today mode
+             ClearTodaySearchFilter();
              // populate people combobox according to toggle (default: only active people)
              PopulatePeopleComboBox();
              // show tasks
@@ -970,6 +1008,10 @@ namespace Todo
              if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
              // hide the people container when in meetings mode
              if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
+             // hide today search when not in today mode
+             if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
+             // clear today filter when leaving today mode
+             ClearTodaySearchFilter();
              // populate meetings combobox according to toggle (default: only active meetings)
              PopulateMeetingsComboBox();
              try { ApplyMeetingsFilter(null); } catch { ApplyFilter(); }
@@ -993,6 +1035,9 @@ namespace Todo
                 SearchTextBox.Text = string.Empty;
                 SearchTextBox.Focus();
             }
+            // hide Today search when in All mode and clear it
+            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
+            ClearTodaySearchFilter();
 
             // Load all tasks
             try { ApplyAllFilter(SearchTextBox?.Text); } catch { ApplyFilter(); }
@@ -1608,7 +1653,15 @@ namespace Todo
                 int total = 0;
                 try { total = AllTasks.Values.SelectMany(list => list).Count(t => t != null && !t.IsPlaceholder); } catch { total = 0; }
                 int current = 0;
-                try { current = TaskList.Count(t => t != null && !t.IsPlaceholder); } catch { current = 0; }
+                try
+                {
+                    // Count visible items in the ListView so filters are respected
+                    if (lbTasksList != null)
+                        current = lbTasksList.Items.OfType<TaskModel>().Count(t => t != null && !t.IsPlaceholder);
+                    else
+                        current = TaskList.Count(t => t != null && !t.IsPlaceholder);
+                }
+                catch { current = 0; }
                 totalTb.Text = total.ToString();
                 viewTb.Text = current.ToString();
             }
@@ -1747,6 +1800,104 @@ namespace Todo
                 return mw.AllTasks.ToDictionary(kv => kv.Key, kv => kv.Value);
             }
             catch { return new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>>(); }
+        }
+
+        // TODAY SEARCH IMPLEMENTATION
+        private void TodaySearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ApplyTodaySearchFilter();
+            UpdateTotals();
+        }
+
+        private void TodayClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (TodaySearchTextBox != null)
+                {
+                    TodaySearchTextBox.Text = string.Empty;
+                    TodaySearchTextBox.Focus();
+                }
+            }
+            catch { }
+        }
+
+        private void ApplyTodaySearchFilter()
+        {
+            try
+            {
+                var view = CollectionViewSource.GetDefaultView(lbTasksList?.ItemsSource);
+                if (view == null)
+                    return;
+
+                // Only active in Today mode; otherwise clear any filter
+                if (_mode != ViewMode.Today)
+                {
+                    if (view.Filter != null)
+                    {
+                        view.Filter = null;
+                        view.Refresh();
+                    }
+                    return;
+                }
+
+                var term = TodaySearchTextBox != null ? (TodaySearchTextBox.Text ?? string.Empty).Trim() : string.Empty;
+                if (string.IsNullOrEmpty(term))
+                {
+                    view.Filter = o => true; // show all
+                    view.Refresh();
+                    return;
+                }
+
+                var lower = term.ToLowerInvariant();
+                view.Filter = o =>
+                {
+                    if (o is TaskModel t)
+                    {
+                        // Always keep the placeholder visible so a new task can be added while searching
+                        if (t.IsPlaceholder) return true;
+                        if (!string.IsNullOrEmpty(t.TaskName) && t.TaskName.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                        if (!string.IsNullOrEmpty(t.Description) && t.Description.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                        if (t.People != null && t.People.Any(p => !string.IsNullOrEmpty(p) && p.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
+                        if (t.Meetings != null && t.Meetings.Any(m => !string.IsNullOrEmpty(m) && m.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
+                        return false;
+                    }
+                    return true;
+                };
+                view.Refresh();
+            }
+            catch { }
+        }
+
+        private void ClearTodaySearchFilter()
+        {
+            try
+            {
+                if (TodaySearchTextBox != null)
+                {
+                    TodaySearchTextBox.Text = string.Empty;
+                }
+                var view = CollectionViewSource.GetDefaultView(lbTasksList?.ItemsSource);
+                if (view != null)
+                {
+                    view.Filter = null;
+                    view.Refresh();
+                }
+            }
+            catch { }
+        }
+
+        private void AllSearchClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (SearchTextBox != null)
+                {
+                    SearchTextBox.Text = string.Empty;
+                    SearchTextBox.Focus();
+                }
+            }
+            catch { }
         }
     }
 }

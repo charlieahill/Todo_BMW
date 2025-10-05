@@ -1428,7 +1428,22 @@ namespace Todo
         public DateTime Date { get; }
         public string DateString => Date.ToString("dd/MM/yyyy");
         public string Weekday => Date.ToString("dddd");
-        public double? Worked { get; }
+        // Backing original worked hours from summary (may not account for per-shift lunch breaks)
+        private double? _workedFromSummary;
+        // Compute Worked from persisted shifts when available so lunch breaks are respected
+        public double? Worked
+        {
+            get
+            {
+                try
+                {
+                    if (Shifts != null && Shifts.Count > 0)
+                        return Shifts.Sum(s => s.Hours);
+                }
+                catch { }
+                return _workedFromSummary;
+            }
+        }
         public double Standard { get; }
         // cumulative account balances as of end of this day
         public double CumulativeTIL { get; set; }
@@ -1459,7 +1474,7 @@ namespace Todo
         public DayViewModel(DaySummary s)
         {
             Date = s.Date;
-            Worked = s.WorkedHours;
+            _workedFromSummary = s.WorkedHours;
             Standard = s.StandardHours;
             Template = TimeTrackingService.Instance.GetTemplates().FirstOrDefault(t => t.AppliesTo(s.Date));
             // determine type: weekend = Saturday or Sunday
