@@ -14,6 +14,8 @@
                     <StackPanel Orientation="Vertical">
                         <TextBlock Text="{Binding DateString}" FontWeight="Bold" />
                         <TextBlock Text="{Binding Weekday}" FontStyle="Italic" FontSize="12" />
+                        <!-- New: show day type text -->
+                        <TextBlock Text="{Binding DayType}" FontSize="11" Foreground="Gray" />
                     </StackPanel>
                     <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Run Text="Worked: " />
@@ -21,7 +23,8 @@
                     </TextBlock>
                     <TextBlock Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Run Text="Std: " />
-                        <Run Text="{Binding StandardDisplay, Mode=OneWay}" />
+                        <!-- Updated: show computed target hours instead of standard -->
+                        <Run Text="{Binding TargetDisplay, Mode=OneWay}" />
                     </TextBlock>
                 </Grid>
             </Border>
@@ -73,14 +76,27 @@
                 <CheckBox x:Name="ColorModeCheck" Content="Color by physical location" Margin="8,0,0,0" VerticalAlignment="Center" Checked="ColorModeCheck_Checked" Unchecked="ColorModeCheck_Unchecked" />
             </StackPanel>
 
-            <!-- Custom month grid -->
-            <ItemsControl x:Name="MonthGrid" ItemTemplate="{StaticResource MonthGridItemTemplate}" Width="420" Height="220">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Columns="7" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-            </ItemsControl>
+            <!-- Custom month grid with tall narrow prev/next buttons -->
+            <Grid Width="468" Height="220">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="420" />
+                    <ColumnDefinition Width="24" />
+                </Grid.ColumnDefinitions>
+                <Button Grid.Column="0" Width="24" Height="220" Click="PrevMonthButton_Click" VerticalAlignment="Stretch" HorizontalAlignment="Center" Padding="0">
+                    <Path Fill="#666666" Stretch="Uniform" Margin="2" Data="M 16 0 L 0 10 L 16 20 Z" />
+                </Button>
+                <ItemsControl x:Name="MonthGrid" Grid.Column="1" ItemTemplate="{StaticResource MonthGridItemTemplate}" Width="420" Height="220">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="7" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+                <Button Grid.Column="2" Width="24" Height="220" Click="NextMonthButton_Click" VerticalAlignment="Stretch" HorizontalAlignment="Center" Padding="0">
+                    <Path Fill="#666666" Stretch="Uniform" Margin="2" Data="M 0 0 L 16 10 L 0 20 Z" />
+                </Button>
+            </Grid>
 
             <TextBlock Text="Days in month" FontWeight="Bold" Margin="0,6,0,4" />
             <ListBox x:Name="DaysList" ItemTemplate="{StaticResource DayItemTemplate}" SelectionChanged="DaysList_SelectionChanged"

@@ -224,20 +224,37 @@ namespace Todo
                         Date = s.Date
                     }).ToList();
                 }
-                // compute worked hours for this day (prefer shifts sum if available)
+                else
+                {
+                    d.Shifts = new List<Shift>();
+                }
+
+                // compute worked hours for this day strictly from shifts
                 double dayWorked = 0;
                 if (d.Shifts != null && d.Shifts.Count > 0)
                     dayWorked = d.Shifts.Sum(s => s.Hours);
-                else if (d.Worked.HasValue)
-                    dayWorked = d.Worked.Value;
 
                 // determine target hours for this day (override or template default)
-                double dayTarget = d.TargetHours ?? 0;
-                if (dayTarget <= 0 && d.Template != null)
+                double dayTarget;
+                if (d.TargetHours.HasValue)
+                {
+                    dayTarget = d.TargetHours.Value; // explicit override (can be zero)
+                }
+                else if (d.DayType == DayType.Vacation || d.DayType == DayType.PublicHoliday)
+                {
+                    dayTarget = 0; // auto-zero on vacation or public holiday when no explicit override
+                }
+                else if (d.Template != null)
                 {
                     int idx = ((int)d.Date.DayOfWeek + 6) % 7;
                     if (d.Template.HoursPerWeekday != null && d.Template.HoursPerWeekday.Length == 7)
                         dayTarget = d.Template.HoursPerWeekday[idx];
+                    else
+                        dayTarget = 0;
+                }
+                else
+                {
+                    dayTarget = 0;
                 }
 
                 // compute delta = worked - target (can be negative)
@@ -320,11 +337,13 @@ namespace Todo
                         }
                         catch { }
 
-                        // If day marked as holiday, set target hours to zero and persist override
-                        if (dt == DayType.Vacation)
+                        // If day marked as holiday or public holiday, set target hours to zero and persist override
+                        if (dt == DayType.Vacation || dt == DayType.PublicHoliday)
                         {
                             vm.TargetHours = 0;
                             try { TimeTrackingService.Instance.UpsertOverride(vm.Date, vm.PositionOverride, vm.LocationOverride, vm.PhysicalLocationOverride, vm.TargetHours, dt); } catch { }
+                            // update target textbox immediately
+                            try { if (this.FindName("ShiftTargetText") is TextBox tb) tb.Text = "0"; } catch { }
                         }
 
                         // Adjust global holiday account only when transitioning into/out-of Vacation to avoid double-counting
@@ -361,6 +380,7 @@ namespace Todo
                         // Recompute cumulatives and update accounts since day types/targets changed
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
+                        UpdateShiftTotalsDisplay();
                     }
                 }
             }
@@ -379,6 +399,78 @@ namespace Todo
             MonthCombo.SelectedIndex = DateTime.Today.Month - 1;
             PopulateDaysForCurrentMonth();
             UpdateSelectedDateLabel(DateTime.Today);
+        }
+
+        // Prev/Next month navigation buttons
+        private void PrevMonthButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (YearCombo.SelectedItem is string ys && int.TryParse(ys, out var year))
+                {
+                    int monthIndex = MonthCombo.SelectedIndex; // 0..11
+                    if (monthIndex > 0)
+                    {
+                        MonthCombo.SelectedIndex = monthIndex - 1;
+                    }
+                    else
+                    {
+                        int targetYear = year - 1;
+                        EnsureYearInCombo(targetYear);
+                        YearCombo.SelectedItem = targetYear.ToString();
+                        MonthCombo.SelectedIndex = 11; // December
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void NextMonthButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (YearCombo.SelectedItem is string ys && int.TryParse(ys, out var year))
+                {
+                    int monthIndex = MonthCombo.SelectedIndex; // 0..11
+                    if (monthIndex < 11)
+                    {
+                        MonthCombo.SelectedIndex = monthIndex + 1;
+                    }
+                    else
+                    {
+                        int targetYear = year + 1;
+                        EnsureYearInCombo(targetYear);
+                        YearCombo.SelectedItem = targetYear.ToString();
+                        MonthCombo.SelectedIndex = 0; // January
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void EnsureYearInCombo(int year)
+        {
+            try
+            {
+                string ys = year.ToString();
+                bool exists = false;
+                foreach (var item in YearCombo.Items)
+                {
+                    if (item is string s && s == ys) { exists = true; break; }
+                }
+                if (!exists)
+                {
+                    // Insert keeping ascending order
+                    int insertAt = 0;
+                    for (int i = 0; i < YearCombo.Items.Count; i++)
+                    {
+                        if (int.TryParse(YearCombo.Items[i] as string, out var val) && val < year)
+                            insertAt = i + 1;
+                    }
+                    YearCombo.Items.Insert(insertAt, ys);
+                }
+            }
+            catch { }
         }
 
         // Save edits currently present in the right-hand detail fields into the given DayViewModel
@@ -427,15 +519,28 @@ namespace Todo
                     double dayWorked = 0;
                     if (d.Shifts != null && d.Shifts.Count > 0)
                         dayWorked = d.Shifts.Sum(s => s.Hours);
-                    else if (d.Worked.HasValue)
-                        dayWorked = d.Worked.Value;
+                    // no fallback to summary; 0 if no shifts
 
-                    double dayTarget = d.TargetHours ?? 0;
-                    if (dayTarget <= 0 && d.Template != null)
+                    double dayTarget;
+                    if (d.TargetHours.HasValue)
+                    {
+                        dayTarget = d.TargetHours.Value;
+                    }
+                    else if (d.DayType == DayType.Vacation || d.DayType == DayType.PublicHoliday)
+                    {
+                        dayTarget = 0;
+                    }
+                    else if (d.Template != null)
                     {
                         int idx = ((int)d.Date.DayOfWeek + 6) % 7;
                         if (d.Template.HoursPerWeekday != null && d.Template.HoursPerWeekday.Length == 7)
                             dayTarget = d.Template.HoursPerWeekday[idx];
+                        else
+                            dayTarget = 0;
+                    }
+                    else
+                    {
+                        dayTarget = 0;
                     }
 
                     double dayDelta = dayWorked - (dayTarget > 0 ? dayTarget : 0);
@@ -518,8 +623,7 @@ namespace Todo
                     double quickTotal = 0;
                     if (vm.Shifts != null && vm.Shifts.Count > 0)
                         quickTotal = vm.Shifts.Sum(s => s.Hours);
-                    else if (vm.Worked.HasValue)
-                        quickTotal = vm.Worked.Value;
+                    // no fallback to summary
                     TotalWorkedDataTextBlock.Text = FormatHoursAsHHmm(quickTotal);
                 }
                 catch { }
@@ -677,11 +781,20 @@ namespace Todo
         {
             // on lost focus persist target
             if (_activeDay == null) return;
-            if (this.FindName("ShiftTargetText") is TextBox tb && double.TryParse(tb.Text, out var val))
+            if (this.FindName("ShiftTargetText") is TextBox tb)
             {
-                _activeDay.TargetHours = val;
-                SaveCurrentDayEdits();
+                var text = tb.Text?.Trim();
+                if (string.IsNullOrEmpty(text))
+                {
+                    // empty clears override
+                    _activeDay.TargetHours = null;
+                }
+                else if (double.TryParse(text, out var val))
+                {
+                    _activeDay.TargetHours = val; // allow explicit zero
+                }
             }
+            SaveCurrentDayEdits();
             UpdateShiftTotalsDisplay();
         }
 
@@ -946,15 +1059,29 @@ namespace Todo
                 double totalWorked = 0;
                 if (_activeDay.Shifts != null && _activeDay.Shifts.Count > 0)
                     totalWorked = _activeDay.Shifts.Sum(s => s.Hours);
-                else if (_activeDay.Worked.HasValue)
-                    totalWorked = _activeDay.Worked.Value;
+                // no fallback to summary
 
-                double target = _activeDay.TargetHours ?? 0;
-                if (target <= 0 && _activeDay.Template != null)
+                double target;
+                bool explicitOverride = _activeDay.TargetHours.HasValue;
+                if (explicitOverride)
+                {
+                    target = _activeDay.TargetHours.Value; // can be zero
+                }
+                else if (_activeDay.DayType == DayType.Vacation || _activeDay.DayType == DayType.PublicHoliday)
+                {
+                    target = 0; // auto-zero when no explicit override
+                }
+                else if (_activeDay.Template != null)
                 {
                     int idx = ((int)_activeDay.Date.DayOfWeek + 6) % 7;
                     if (_activeDay.Template.HoursPerWeekday != null && _activeDay.Template.HoursPerWeekday.Length == 7)
                         target = _activeDay.Template.HoursPerWeekday[idx];
+                    else
+                        target = 0;
+                }
+                else
+                {
+                    target = 0;
                 }
 
                 double delta = totalWorked - (target > 0 ? target : 0);
@@ -964,7 +1091,12 @@ namespace Todo
                 if (this.FindName("TotalDeltaDataTextBlock") is TextBlock td2)
                     td2.Text = FormatHoursAsHHmm(delta);
                 if (this.FindName("ShiftTargetText") is TextBox st2)
-                    st2.Text = target > 0 ? target.ToString("0.##") : string.Empty;
+                {
+                    if (explicitOverride)
+                        st2.Text = target.ToString("0.##");
+                    else
+                        st2.Text = target > 0 ? target.ToString("0.##") : "0"; // show 0 when it is auto-zero due to holiday/public holiday
+                }
             }
             catch { }
         }
@@ -1046,6 +1178,7 @@ namespace Todo
                     // load persisted shifts
                     var saved = TimeTrackingService.Instance.GetShiftsForDate(d.Date).ToList();
                     if (saved.Any()) d.Shifts = saved.Select(s2 => new Shift { Date = s2.Date, Start = s2.Start, End = s2.End, Description = s2.Description, ManualStartOverride = s2.ManualStartOverride, ManualEndOverride = s2.ManualEndOverride, LunchBreak = s2.LunchBreak, DayMode = s2.DayMode }).ToList();
+                    else d.Shifts = new List<Shift>();
                 }
 
                 // prompt for filename
@@ -1443,7 +1576,6 @@ namespace Todo
         public DateTime Date { get; }
         public string DateString => Date.ToString("dd/MM/yyyy");
         public string Weekday => Date.ToString("dddd");
-        private double? _workedFromSummary;
         public double? Worked
         {
             get
@@ -1454,7 +1586,7 @@ namespace Todo
                         return Shifts.Sum(s => s.Hours);
                 }
                 catch { }
-                return _workedFromSummary;
+                return 0; // always derive from shifts; 0 when none
             }
         }
         public double Standard { get; }
@@ -1462,7 +1594,8 @@ namespace Todo
         public double CumulativeHoliday { get; set; }
         public string CumulativeTILDisplay => TimeTrackingDialog.FormatHoursAsHHmm(CumulativeTIL);
         public string CumulativeHolidayDisplay => CumulativeHoliday.ToString("0.##") + "d";
-        public double? Delta => Worked.HasValue ? (Worked.Value - Standard) : (double?)null;
+        // Delta should be worked - target, not worked - standard
+        public double? Delta => Worked.HasValue ? (Worked.Value - TargetComputed) : (double?)null;
         public string WorkedDisplay => Worked.HasValue ? TimeTrackingDialog.FormatHoursAsHHmm(Worked.Value) : "00:00";
         public string StandardDisplay => Standard.ToString("0.00");
         public DayType DayType { get; private set; }
@@ -1475,10 +1608,29 @@ namespace Todo
         public List<Shift> Shifts { get; set; }
         public double? TargetHours { get; set; }
 
+        // New: computed target hours for this day using the same logic as the dialog
+        public double TargetComputed
+        {
+            get
+            {
+                if (TargetHours.HasValue)
+                    return TargetHours.Value;
+                if (DayType == DayType.Vacation || DayType == DayType.PublicHoliday)
+                    return 0;
+                if (Template != null && Template.HoursPerWeekday != null && Template.HoursPerWeekday.Length == 7)
+                {
+                    int idx = ((int)Date.DayOfWeek + 6) % 7;
+                    return Template.HoursPerWeekday[idx];
+                }
+                return 0;
+            }
+        }
+        public string TargetDisplay => TargetComputed.ToString("0.00");
+
         public DayViewModel(DaySummary s)
         {
             Date = s.Date;
-            _workedFromSummary = s.WorkedHours;
+            // Worked must be derived only from shifts created by the user
             Standard = s.StandardHours;
             Template = TimeTrackingService.Instance.GetTemplates().FirstOrDefault(t => t.AppliesTo(s.Date));
             if (Date.DayOfWeek == DayOfWeek.Saturday || Date.DayOfWeek == DayOfWeek.Sunday)
@@ -1501,31 +1653,6 @@ namespace Todo
             else
             {
                 Shifts = new List<Shift>();
-            }
-
-            if ((Shifts == null || Shifts.Count == 0) && s.OpenTime.HasValue && s.CloseTime.HasValue)
-            {
-                try
-                {
-                    var start = s.OpenTime.Value;
-                    var end = s.CloseTime.Value;
-                    if (end > start)
-                    {
-                        var synthetic = new Shift
-                        {
-                            Date = Date,
-                            Start = start,
-                            End = end,
-                            Description = "(from events)",
-                            LunchBreak = TimeSpan.Zero,
-                            ManualStartOverride = false,
-                            ManualEndOverride = false,
-                            DayMode = "auto"
-                        };
-                        Shifts.Add(synthetic);
-                    }
-                }
-                catch { }
             }
         }
 
