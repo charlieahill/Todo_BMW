@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input;
 
 namespace Todo
 {
@@ -289,6 +290,21 @@ namespace Todo
         {
             this.DialogResult = false;
             this.Close();
+        }
+
+        // Handle Enter to accept and Escape to cancel anywhere in the window
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                Ok_Click(this, new RoutedEventArgs());
+            }
+            else if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Cancel_Click(this, new RoutedEventArgs());
+            }
         }
 
         private class TimeItem

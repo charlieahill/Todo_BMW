@@ -7,7 +7,7 @@ namespace Todo
         public DateTime Date { get; set; }
         public TimeSpan Start { get; set; }
         public TimeSpan End { get; set; }
-        public string Description { get; set; }
+        public string Description { get; set; } = string.Empty;
         // Subtract lunch break from total hours
         public double Hours => Math.Max(0, (End - Start - LunchBreak).TotalHours);
 

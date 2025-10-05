@@ -520,7 +520,7 @@ namespace Todo
                         quickTotal = vm.Shifts.Sum(s => s.Hours);
                     else if (vm.Worked.HasValue)
                         quickTotal = vm.Worked.Value;
-                    TotalWorkedDataTextBlock.Text = quickTotal.ToString("0.##") + "h";
+                    TotalWorkedDataTextBlock.Text = FormatHoursAsHHmm(quickTotal);
                 }
                 catch { }
                  DayTypeCombo.SelectedItem = vm.DayType.ToString();
@@ -935,7 +935,7 @@ namespace Todo
             {
                 if (_activeDay == null)
                 {
-                    if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw) tw.Text = "0.00h";
+                    if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw) tw.Text = "00:00";
                     if (this.FindName("TotalDeltaDataTextBlock") is TextBlock td) td.Text = "0.00h";
                     if (this.FindName("ShiftTargetText") is TextBox st) st.Text = string.Empty;
                     return;
@@ -958,7 +958,7 @@ namespace Todo
                 double delta = totalWorked - (target > 0 ? target : 0);
 
                 if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw2)
-                    tw2.Text = totalWorked.ToString("0.##") + "h";
+                    tw2.Text = FormatHoursAsHHmm(totalWorked);
                 if (this.FindName("TotalDeltaDataTextBlock") is TextBlock td2)
                     td2.Text = delta.ToString("0.##") + "h";
                 if (this.FindName("ShiftTargetText") is TextBox st2)
@@ -1411,6 +1411,19 @@ namespace Todo
             byte B = (byte)(Math.Min(1, Math.Max(0, b)) * 255);
             return XColor.FromArgb(255, R, G, B);
         }
+
+        // Format a double hours value as HH:MM (zero-padded). Handles negative and fractional minutes properly.
+        public static string FormatHoursAsHHmm(double hours)
+        {
+            if (double.IsNaN(hours) || double.IsInfinity(hours)) return "00:00";
+            var negative = hours < 0;
+            var abs = Math.Abs(hours);
+            int h = (int)Math.Floor(abs);
+            int m = (int)Math.Round((abs - h) * 60);
+            if (m == 60) { h += 1; m = 0; }
+            var s = $"{h:00}:{m:00}";
+            return negative ? "-" + s : s;
+        }
     }
 
     // Simple settings for window position/size
@@ -1451,7 +1464,7 @@ namespace Todo
         public string CumulativeTILDisplay => CumulativeTIL.ToString("0.##") + "h";
         public string CumulativeHolidayDisplay => CumulativeHoliday.ToString("0.##") + "d";
         public double? Delta => Worked.HasValue ? (Worked.Value - Standard) : (double?)null;
-        public string WorkedDisplay => Worked.HasValue ? Worked.Value.ToString("0.00") : "0:00";
+        public string WorkedDisplay => Worked.HasValue ? TimeTrackingDialog.FormatHoursAsHHmm(Worked.Value) : "00:00";
         public string StandardDisplay => Standard.ToString("0.00");
         public DayType DayType { get; private set; }
         public TimeTemplate Template { get; }
