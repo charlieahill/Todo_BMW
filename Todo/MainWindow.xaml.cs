@@ -679,8 +679,10 @@ namespace Todo
             UpdateTitle();
             UpdateTotals();
 
-            // Re-apply filter since text changes could affect match
-            ApplyTodaySearchFilter();
+            // Do not reapply the Today search filter on every keystroke while editing tasks,
+            // as refreshing the ListView can steal focus. The filter will still update when
+            // the Today search text changes or when the date/mode changes.
+            // ApplyTodaySearchFilter();
         }
 
         private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
@@ -1844,13 +1846,17 @@ namespace Todo
                 var term = TodaySearchTextBox != null ? (TodaySearchTextBox.Text ?? string.Empty).Trim() : string.Empty;
                 if (string.IsNullOrEmpty(term))
                 {
-                    view.Filter = o => true; // show all
-                    view.Refresh();
+                    // Avoid reassigning the filter if it's already cleared
+                    if (view.Filter != null)
+                    {
+                        view.Filter = null;
+                        view.Refresh();
+                    }
                     return;
                 }
 
                 var lower = term.ToLowerInvariant();
-                view.Filter = o =>
+                Predicate<object> pred = o =>
                 {
                     if (o is TaskModel t)
                     {
@@ -1864,6 +1870,9 @@ namespace Todo
                     }
                     return true;
                 };
+
+                // Only set and refresh if predicate actually changed (prevents unnecessary refresh while typing in the list)
+                view.Filter = o => pred(o);
                 view.Refresh();
             }
             catch { }

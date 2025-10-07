@@ -85,6 +85,7 @@ namespace Todo
         private const string TemplatesFileName = "timetracking_templates.json";
         private const string OverridesFileName = "timetracking_overrides.json";
         private const string ShiftsFileName = "timetracking_shifts.json";
+        private const string LocationColorsFileName = "timetracking_locationcolors.json";
 
         private static readonly string AccountsFile = Path.Combine(DataDirectory, AccountsFileName);
         private static readonly string AccountsLogFile = Path.Combine(DataDirectory, AccountsLogFileName);
@@ -92,6 +93,7 @@ namespace Todo
         private static readonly string TemplatesFile = Path.Combine(DataDirectory, TemplatesFileName);
         private static readonly string OverridesFile = Path.Combine(DataDirectory, OverridesFileName);
         private static readonly string ShiftsFile = Path.Combine(DataDirectory, ShiftsFileName);
+        private static readonly string LocationColorsFile = Path.Combine(DataDirectory, LocationColorsFileName);
 
         // Ensure data directory exists before any IO
         static TimeTrackingService()
@@ -109,6 +111,7 @@ namespace Todo
         private List<DayOverride> _overrides = new List<DayOverride>();
         private List<Shift> _shifts = new List<Shift>();
         private List<AccountLogEntry> _accountLog = new List<AccountLogEntry>();
+        private Dictionary<string, string> _locationColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         public static TimeTrackingService Instance { get; } = new TimeTrackingService();
 
@@ -190,6 +193,17 @@ namespace Todo
                 }
             }
             catch { }
+
+            try
+            {
+                if (File.Exists(LocationColorsFile))
+                {
+                    var j = File.ReadAllText(LocationColorsFile);
+                    var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(j);
+                    if (dict != null) _locationColors = new Dictionary<string, string>(dict, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch { }
         }
 
         private void SaveEvents()
@@ -248,6 +262,16 @@ namespace Todo
             {
                 var j = JsonSerializer.Serialize(_accountLog, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(AccountsLogFile, j);
+            }
+            catch { }
+        }
+
+        private void SaveLocationColors()
+        {
+            try
+            {
+                var j = JsonSerializer.Serialize(_locationColors, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(LocationColorsFile, j);
             }
             catch { }
         }
@@ -566,6 +590,56 @@ namespace Todo
         public IReadOnlyList<AccountLogEntry> GetAccountLogEntries(DateTime from, DateTime to, string kind = null)
         {
             return _accountLog.Where(a => a.Date.Date >= from.Date && a.Date.Date <= to.Date && (string.IsNullOrEmpty(kind) || a.Kind == kind)).OrderByDescending(a => a.Date).ToList();
+        }
+
+        // Location colors management
+        public IReadOnlyDictionary<string, string> GetLocationColors() => _locationColors;
+
+        public string GetLocationColor(string location)
+        {
+            if (string.IsNullOrWhiteSpace(location)) return null;
+            return _locationColors.TryGetValue(location, out var hex) ? hex : null;
+        }
+
+        public void SetLocationColor(string location, string hex)
+        {
+            if (string.IsNullOrWhiteSpace(location)) return;
+            if (string.IsNullOrWhiteSpace(hex))
+            {
+                if (_locationColors.Remove(location)) SaveLocationColors();
+                return;
+            }
+            _locationColors[location] = NormalizeHex(hex);
+            SaveLocationColors();
+        }
+
+        public void RemoveLocationColor(string location)
+        {
+            if (string.IsNullOrWhiteSpace(location)) return;
+            if (_locationColors.Remove(location)) SaveLocationColors();
+        }
+
+        public List<string> DiscoverPhysicalLocations()
+        {
+            var list = new List<string>();
+            try
+            {
+                list.AddRange(_overrides.Where(o => !string.IsNullOrWhiteSpace(o.PhysicalLocation)).Select(o => o.PhysicalLocation));
+                list.AddRange(_overrides.Where(o => !string.IsNullOrWhiteSpace(o.Location)).Select(o => o.Location));
+                list.AddRange(_templates.Where(t => !string.IsNullOrWhiteSpace(t.EmploymentLocation)).Select(t => t.EmploymentLocation));
+            }
+            catch { }
+            return list.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
+        }
+
+        private static string NormalizeHex(string hex)
+        {
+            hex = hex.Trim();
+            if (!hex.StartsWith("#")) hex = "#" + hex;
+            if (hex.Length == 7) return hex.ToUpperInvariant(); // #RRGGBB
+            if (hex.Length == 9) return hex.ToUpperInvariant(); // #AARRGGBB
+            // try parse named colors? ignore; fallback
+            return hex.ToUpperInvariant();
         }
     }
 
