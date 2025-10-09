@@ -413,7 +413,7 @@
 
             <!--MODE CONTROLS-->
             <Grid Grid.Column="1" Grid.Row="0">
-                <UniformGrid Columns="4" Rows="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,0,0">
+                <UniformGrid Columns="5" Rows="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,0,0">
                     <!-- Today button (redesigned for clarity) -->
                     <Button Name="TodayButton" Click="TodayButton_Click" ToolTip="Today" Margin="4,0">
                         <Viewbox Width="18" Height="18">
@@ -422,6 +422,18 @@
                                 <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="5" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
                                 <Rectangle Width="12" Height="3" Canvas.Left="6" Canvas.Top="3" Fill="Black"/>
                                 <Ellipse Width="6" Height="6" Canvas.Left="9" Canvas.Top="8" Fill="Black"/>
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+
+                    <!-- Repository button (second) -->
+                    <Button Name="RepositoryButton" Click="RepositoryButton_Click" ToolTip="Repository" Margin="4,0">
+                        <Viewbox Width="18" Height="18">
+                            <Canvas Width="24" Height="24">
+                                <!-- Archive tray icon -->
+                                <Rectangle Width="18" Height="10" Canvas.Left="3" Canvas.Top="11" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
+                                <Rectangle Width="14" Height="3" Canvas.Left="5" Canvas.Top="8" Fill="Black"/>
+                                <Path Data="M8,6 L16,6" Stroke="Black" StrokeThickness="1.2"/>
                             </Canvas>
                         </Viewbox>
                     </Button>
@@ -619,9 +631,23 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="auto"/>
                                 <ColumnDefinition Width="auto"/>
+                                <ColumnDefinition Width="auto"/>
                                 <ColumnDefinition Width="32"/>
                             </Grid.ColumnDefinitions>
-                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsComplete}" Click="CheckBox_Click"/>
+                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsComplete}" Click="CheckBox_Click">
+                                <CheckBox.Style>
+                                    <Style TargetType="CheckBox">
+                                        <Setter Property="IsEnabled" Value="True"/>
+                                        <Style.Triggers>
+                                            <!-- Disable completion on Repository page -->
+                                            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Window}}" Value="Repository">
+                                                <Setter Property="IsEnabled" Value="False"/>
+                                                <Setter Property="ToolTip" Value="Cannot complete items in repository"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </CheckBox.Style>
+                            </CheckBox>
                             <Grid Grid.Column="1">
                                 <TextBox x:Name="TaskTextBox"
                                          Text="{Binding TaskName, UpdateSourceTrigger=PropertyChanged}"
@@ -763,6 +789,61 @@
 
                             <!-- ... Button -->
                             <Button Grid.Column="4" Content="..." Click="TaskOptionsButton_Click" Style="{StaticResource TaskOptionsButtonStyle}" Margin="0,0,2,0"/>
+
+                            <!-- Repo action button column now on the right of the ... button -->
+                            <!-- Send to repository button (visible on Today page) -->
+                            <Button Grid.Column="5" Click="SendToRepositoryButton_Click" ToolTip="Send to repository" Background="Transparent" BorderBrush="Transparent" Padding="0" Width="28" Height="28" Cursor="Hand">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Setter Property="Margin" Value="0,0,0,0"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Window}}" Value="Today"/>
+                                                    <Condition Binding="{Binding IsPlaceholder}" Value="False"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="24" Height="24">
+                                        <!-- Box with down arrow -->
+                                        <Rectangle Width="16" Height="8" Canvas.Left="4" Canvas.Top="12" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
+                                        <Path Data="M12,6 L12,12" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                        <Path Data="M9,10 L12,13 L15,10" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/>
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+
+                            <!-- Move to today button (visible on Repository page) -->
+                            <Button Grid.Column="5" Click="MoveToTodayButton_Click" ToolTip="Move to today" Background="Transparent" BorderBrush="Transparent" Padding="0" Width="28" Height="28" Cursor="Hand">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Setter Property="Margin" Value="0,0,0,0"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Window}}" Value="Repository"/>
+                                                    <Condition Binding="{Binding IsPlaceholder}" Value="False"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="24" Height="24">
+                                        <!-- Calendar with up arrow -->
+                                        <Rectangle Width="16" Height="12" Canvas.Left="4" Canvas.Top="8" Stroke="Black" StrokeThickness="1.2" RadiusX="2" RadiusY="2" Fill="Transparent"/>
+                                        <Path Data="M12,14 L12,9" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                        <Path Data="M9,12 L12,9 L15,12" Stroke="Black" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/>
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
                         </Grid>
                     </Border>
                 </DataTemplate>

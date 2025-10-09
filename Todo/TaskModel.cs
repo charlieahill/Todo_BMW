@@ -198,6 +198,32 @@ namespace Todo
             }
         }
 
+        // New: whether this task is in the repository bucket
+        private bool _inRepository = false;
+        public bool InRepository
+        {
+            get => _inRepository;
+            set
+            {
+                if (_inRepository == value) return;
+                _inRepository = value;
+                OnPropertyChanged(nameof(InRepository));
+            }
+        }
+
+        // New: preferred index to return to when moving back to Today
+        private int? _preferredTodayIndex = null;
+        public int? PreferredTodayIndex
+        {
+            get => _preferredTodayIndex;
+            set
+            {
+                if (_preferredTodayIndex == value) return;
+                _preferredTodayIndex = value;
+                OnPropertyChanged(nameof(PreferredTodayIndex));
+            }
+        }
+
         public override string ToString()
         {
             string completeAsString = "Complete";

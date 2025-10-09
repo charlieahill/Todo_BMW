@@ -32,7 +32,10 @@ namespace Todo
         private static readonly string SaveFileName = System.IO.Path.Combine(DataDirectory, "tasks_by_date.json");
         private static readonly string MetaFileName = System.IO.Path.Combine(DataDirectory, "meta.json");
 
-        // All tasks keyed by date string (yyyy-MM-dd)
+        // Special key for repository bucket (date-independent)
+        private const string RepositoryKey = "__repository__";
+
+        // All tasks keyed by date string (yyyy-MM-dd) or RepositoryKey
         private Dictionary<string, List<TaskModel>> AllTasks { get; set; } = new Dictionary<string, List<TaskModel>>();
 
         public ObservableCollection<TaskModel> TaskList { get; set; } = new ObservableCollection<TaskModel>();
@@ -156,6 +159,9 @@ namespace Todo
 
             // Ensure Today search UI visibility for initial mode
             try { if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Visible; } catch { }
+
+            // Set initial Tag for mode-based triggers
+            this.Tag = "Today";
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -495,6 +501,9 @@ namespace Todo
                     // Deep copy all properties, including id and future scheduling
                     var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
                     model.IsReadOnly = dt != DateTime.Today;
+                    model.InRepository = false;
+                    // carry over preferred index if present in stored item
+                    model.PreferredTodayIndex = t.PreferredTodayIndex;
                     TaskList.Add(model);
                 }
             }
@@ -671,7 +680,10 @@ namespace Todo
                 {
                     var key = DateKey(_currentDate);
                     AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
-                        .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
+                        .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
+                        {
+                            PreferredTodayIndex = t.PreferredTodayIndex
+                        })
                         .ToList();
                 }
             }
@@ -834,6 +846,9 @@ namespace Todo
                         this.Title = $"Todo | {FormatDateShort(_currentDate)}";
                     }
                     break;
+                case ViewMode.Repository:
+                    this.Title = "Todo | Repository";
+                    break;
                 case ViewMode.People:
                     string person = null;
                     if (PeopleFilterComboBox != null && PeopleFilterComboBox.SelectedItem is string p)
@@ -927,7 +942,7 @@ namespace Todo
             }
         }
 
-        private enum ViewMode { Today, People, Meetings, All }
+        private enum ViewMode { Today, Repository, People, Meetings, All }
         private ViewMode _mode = ViewMode.Today;
         private string _activeFilter = null;
 
@@ -937,6 +952,7 @@ namespace Todo
             if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
             _mode = ViewMode.Today;
+            this.Tag = "Today";
             // hide people/meetings filter containers when exiting special modes
             if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
             if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
@@ -960,6 +976,7 @@ namespace Todo
             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
 
             _mode = ViewMode.Today;
+            this.Tag = "Today";
             _activeFilter = null;
             FilterPopup.IsOpen = false;
             CalendarPopup.IsOpen = false;
@@ -971,9 +988,26 @@ namespace Todo
             ApplyTodaySearchFilter();
         }
 
+        private void RepositoryButton_Click(object sender, RoutedEventArgs e)
+        {
+            _mode = ViewMode.Repository;
+            this.Tag = "Repository";
+            // hide date controls and filters/search
+            DateControlsGrid.Visibility = Visibility.Collapsed;
+            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
+            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
+            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
+            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
+
+            ApplyRepositoryFilter();
+            UpdateTitle();
+        }
+
         private void PeopleButton_Click(object sender, RoutedEventArgs e)
         {
             _mode = ViewMode.People;
+            this.Tag = "People";
             // hide date controls and show people combobox container
             DateControlsGrid.Visibility = Visibility.Collapsed;
             if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Visible;
@@ -999,6 +1033,7 @@ namespace Todo
          private void MeetingButton_Click(object sender, RoutedEventArgs e)
          {
              _mode = ViewMode.Meetings;
+             this.Tag = "Meetings";
              // hide date controls and show meetings combobox
              DateControlsGrid.Visibility = Visibility.Collapsed;
              if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Visible;
@@ -1023,6 +1058,7 @@ namespace Todo
         private void AllButton_Click(object sender, RoutedEventArgs e)
         {
             _mode = ViewMode.All;
+            this.Tag = "All";
             FilterPopup.IsOpen = false;
             CalendarPopup.IsOpen = false;
 
@@ -1069,7 +1105,10 @@ namespace Todo
             if (_currentDate == null) return;
             var key = DateKey(_currentDate);
             var realTasks = TaskList.Where(t => !t.IsPlaceholder)
-                .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id))
+                .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
+                {
+                    PreferredTodayIndex = t.PreferredTodayIndex
+                })
                 .ToList();
 
             if (realTasks.Count > 0)
@@ -1088,12 +1127,12 @@ namespace Todo
             if (sender is Button btn && btn.DataContext is TaskModel task && !task.IsPlaceholder)
             {
                 // capture origin info
-                var originKey = DateKey(_currentDate);
+                var originKey = (_mode == ViewMode.Repository) ? RepositoryKey : DateKey(_currentDate);
                 var originalId = task.Id;
 
-                // Gather suggestions from all tasks
-                var allPeople = AllTasks.Values.SelectMany(list => list.SelectMany(t => t.People)).Distinct().ToList();
-                var allMeetings = AllTasks.Values.SelectMany(list => list.SelectMany(t => t.Meetings)).Distinct().ToList();
+                // Gather suggestions from all tasks (exclude repository if needed?)
+                var allPeople = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.SelectMany(t => t.People)).Distinct().ToList();
+                var allMeetings = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.SelectMany(t => t.Meetings)).Distinct().ToList();
                 var dialog = new TaskDialog(task, allPeople, allMeetings) { Owner = this };
                 if (dialog.ShowDialog() == true)
                 {
@@ -1157,6 +1196,8 @@ namespace Todo
                                 list[i].IsFuture = task.IsFuture;
                                 list[i].FutureDate = task.FutureDate;
                                 list[i].IsComplete = task.IsComplete;
+                                // preserve preferred index meta if present on UI model
+                                list[i].PreferredTodayIndex = task.PreferredTodayIndex;
                                 updatedInPlace = true;
                                 // If the UI model has SetDate/ShowDate, leave them to be derived when reloading
                             }
@@ -1176,46 +1217,28 @@ namespace Todo
                     // 3) If we didn't update in place, add to the target bucket (preserve existing relative ordering not possible here)
                     if (!updatedInPlace)
                     {
-                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People ?? new List<string>()), new List<string>(task.Meetings ?? new List<string>()), task.IsFuture, task.FutureDate, task.LinkPath, task.Id);
+                        var copy = new TaskModel(task.TaskName, task.IsComplete, false, task.Description, new List<string>(task.People ?? new List<string>()), new List<string>(task.Meetings ?? new List<string>()), task.IsFuture, task.FutureDate, task.LinkPath, task.Id)
+                        {
+                            PreferredTodayIndex = task.PreferredTodayIndex
+                        };
                         if (!AllTasks.ContainsKey(targetKey)) AllTasks[targetKey] = new List<TaskModel>();
 
-                        // If there was an original stored entry we removed above, try to insert at its original index
-                        var originalStored = storedEntries.FirstOrDefault();
-                        if (originalStored != null && originalStored.Key != targetKey)
-                        {
-                            // If original bucket existed and we removed it, just append to target (cannot preserve cross-bucket position)
-                            AllTasks[targetKey].Add(copy);
-                        }
-                        else if (originalStored == null)
-                        {
-                            // New task - append
-                            AllTasks[targetKey].Add(copy);
-                        }
-                        else
-                        {
-                            // Shouldn't usually get here, but append as fallback
-                            AllTasks[targetKey].Add(copy);
-                        }
+                        AllTasks[targetKey].Add(copy);
 
                         // If the task was visible in the current TaskList (we were viewing that date), remove it if it moved away
-                        if (originKey == DateKey(_currentDate) && targetKey != originKey)
+                        if (originKey != targetKey)
                         {
                             TaskList.Remove(task);
-                            EnsureHasPlaceholder();
+                            if (_mode == ViewMode.Today)
+                                EnsureHasPlaceholder();
                         }
                     }
                     else
                     {
                         // If updated in place and we are viewing that date, update the UI model so it reflects any changes
-                        if (_currentDate == DateTime.ParseExact(targetKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
+                        if (_mode == ViewMode.Today && _currentDate == DateTime.ParseExact(targetKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
                         {
                             // UI model 'task' already has the updated values from dialog above.
-                            // Nothing more to do for ordering.
-                        }
-                        else
-                        {
-                            // If the task was updated in place in storage but we're not viewing that date,
-                            // we don't need to modify TaskList here.
                         }
                     }
 
@@ -1229,6 +1252,7 @@ namespace Todo
         {
             // For now, search behaves like Today (clears filters).
             _mode = ViewMode.Today;
+            this.Tag = "Today";
             FilterPopup.IsOpen = false;
             CalendarPopup.IsOpen = false;
             SetCurrentDate(DateTime.Today);
@@ -1249,7 +1273,7 @@ namespace Todo
         {
             TaskList.Clear();
 
-            IEnumerable<TaskModel> tasks = AllTasks.Values.SelectMany(list => list);
+            IEnumerable<TaskModel> tasks = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(list => list.Value);
 
             // Apply active filter
             if (!string.IsNullOrEmpty(_activeFilter))
@@ -1323,7 +1347,7 @@ namespace Todo
         {
             TaskList.Clear();
             // Include date key so we can filter by task date
-            var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+            var entries = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
             var tasks = entries.Where(e => e.Task.People != null && e.Task.People.Count > 0).Select(e => new { e.Task, e.DateKey });
             if (!string.IsNullOrEmpty(person))
                 tasks = tasks.Where(e => e.Task.People.Contains(person));
@@ -1351,7 +1375,7 @@ namespace Todo
         private void ApplyMeetingsFilter(string meeting)
         {
             TaskList.Clear();
-            var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+            var entries = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
             var tasks = entries.Where(e => e.Task.Meetings != null && e.Task.Meetings.Count > 0).Select(e => new { e.Task, e.DateKey });
             if (!string.IsNullOrEmpty(meeting))
                 tasks = tasks.Where(e => e.Task.Meetings.Contains(meeting));
@@ -1379,8 +1403,8 @@ namespace Todo
         {
             TaskList.Clear();
 
-            // Build a sequence of tasks annotated with their source date key
-            var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key })).ToList();
+            // Build a sequence of tasks annotated with their source date key, excluding repository bucket
+            var entries = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key })).ToList();
 
             if (!string.IsNullOrEmpty(term))
             {
@@ -1409,6 +1433,23 @@ namespace Todo
                 TaskList.Add(model);
             }
 
+            UpdateTotals();
+        }
+
+        private void ApplyRepositoryFilter()
+        {
+            TaskList.Clear();
+            if (AllTasks.ContainsKey(RepositoryKey))
+            {
+                foreach (var t in AllTasks[RepositoryKey])
+                {
+                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
+                    model.InRepository = true;
+                    // carry forward preferred index metadata when showing in repo
+                    model.PreferredTodayIndex = t.PreferredTodayIndex;
+                    TaskList.Add(model);
+                }
+            }
             UpdateTotals();
         }
 
@@ -1690,7 +1731,7 @@ namespace Todo
                 bool showAll = PeopleShowAllToggle?.IsChecked == true;
                 IEnumerable<string> people;
                 // Build entries with source date so we can exclude old completed items when not showing all
-                var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+                var entries = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
                 if (showAll)
                 {
                     // include all tasks (don't filter out old completed when 'show all' is on)
@@ -1722,7 +1763,7 @@ namespace Todo
             {
                 bool showAll = MeetingsShowAllToggle?.IsChecked == true;
                 IEnumerable<string> meetings;
-                var entries = AllTasks.SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
+                var entries = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }));
                 if (showAll)
                 {
                     // include all tasks (don't filter out old completed when 'show all' is on)
@@ -1904,6 +1945,95 @@ namespace Todo
                 {
                     SearchTextBox.Text = string.Empty;
                     SearchTextBox.Focus();
+                }
+            }
+            catch { }
+        }
+
+        // Send to repository from Today page
+        private void SendToRepositoryButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (sender is Button btn && btn.DataContext is TaskModel tm && !tm.IsPlaceholder)
+                {
+                    var todayKey = DateKey(_currentDate);
+                    if (!AllTasks.ContainsKey(RepositoryKey)) AllTasks[RepositoryKey] = new List<TaskModel>();
+
+                    // Determine the task's index in today's list (excluding placeholder)
+                    int indexInToday = TaskList.Where(t => !t.IsPlaceholder).ToList().FindIndex(t => t.Id == tm.Id);
+
+                    // Remove from today's storage
+                    if (AllTasks.ContainsKey(todayKey))
+                    {
+                        AllTasks[todayKey].RemoveAll(t => t.Id == tm.Id);
+                        if (AllTasks[todayKey].Count == 0) AllTasks.Remove(todayKey);
+                    }
+
+                    // Add to repository storage (preserve Id) and carry preferred index
+                    var copy = new TaskModel(tm.TaskName, tm.IsComplete, false, tm.Description, new List<string>(tm.People), new List<string>(tm.Meetings), tm.IsFuture, tm.FutureDate, tm.LinkPath, tm.Id)
+                    {
+                        InRepository = true,
+                        PreferredTodayIndex = indexInToday >= 0 ? (int?)indexInToday : null
+                    };
+                    AllTasks[RepositoryKey].Add(copy);
+
+                    // Update UI (remove from list, keep placeholder)
+                    TaskList.Remove(tm);
+                    EnsureHasPlaceholder();
+
+                    SaveTasks();
+                }
+            }
+            catch { }
+        }
+
+        // Move from repository back to today
+        private void MoveToTodayButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (sender is Button btn && btn.DataContext is TaskModel tm && !tm.IsPlaceholder)
+                {
+                    if (!AllTasks.ContainsKey(RepositoryKey)) return;
+
+                    // Find stored repo entry for this item to read its PreferredTodayIndex
+                    TaskModel repoStored = AllTasks[RepositoryKey].FirstOrDefault(t => t.Id == tm.Id);
+                    int? preferredIndex = repoStored?.PreferredTodayIndex;
+
+                    // Remove from repository
+                    AllTasks[RepositoryKey].RemoveAll(t => t.Id == tm.Id);
+                    if (AllTasks[RepositoryKey].Count == 0) AllTasks.Remove(RepositoryKey);
+
+                    // Add to today's key at the preferred index if available
+                    var todayKey = DateKey(DateTime.Today);
+                    if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
+                    var copy = new TaskModel(tm.TaskName, tm.IsComplete, false, tm.Description, new List<string>(tm.People), new List<string>(tm.Meetings), false, null, tm.LinkPath, tm.Id)
+                    {
+                        InRepository = false,
+                        PreferredTodayIndex = preferredIndex
+                    };
+
+                    var todayList = AllTasks[todayKey];
+                    if (preferredIndex.HasValue && preferredIndex.Value >= 0 && preferredIndex.Value <= todayList.Count)
+                    {
+                        todayList.Insert(preferredIndex.Value, copy);
+                    }
+                    else
+                    {
+                        todayList.Add(copy);
+                    }
+
+                    // Update UI
+                    TaskList.Remove(tm);
+
+                    // If we're showing Today, reload to reflect new ordering
+                    if (_mode == ViewMode.Today && _currentDate == DateTime.Today)
+                    {
+                        LoadTasksForDate(DateTime.Today);
+                    }
+
+                    SaveTasks();
                 }
             }
             catch { }
