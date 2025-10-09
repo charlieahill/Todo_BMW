@@ -3,6 +3,38 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Time tracking" Height="760" Width="1000" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" MinHeight="760" MaxHeight="760" MinWidth="1000" MaxWidth="1000">
     <Window.Resources>
+        <!-- Shared style for compact glyph icon buttons using Segoe MDL2 Assets -->
+        <Style x:Key="GlyphIconButton" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#10AAAAAA"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#20888888"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- MDL2 glyphs: Edit (E70F), Delete (E74D) -->
         <DataTemplate x:Key="DayItemTemplate">
             <Border x:Name="RootBorder" Padding="6" Margin="2" CornerRadius="4">
                 <Grid>
@@ -133,6 +165,18 @@
                         <TextBlock x:Name="AccountHolidayValue" Text="0.00 days" />
                     </StackPanel>
                     <Button Content="Reset" Margin="12,0,0,0" Click="ResetHoliday_Click" />
+                    <!-- Manual override indicator for Holiday -->
+                    <StackPanel x:Name="HolidayOverridePanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0" Visibility="Collapsed">
+                        <TextBlock x:Name="HolidayOverrideLabel" Foreground="#CC8A00" VerticalAlignment="Center"/>
+                        <Button x:Name="EditHolidayOverrideButton" Style="{StaticResource GlyphIconButton}" Margin="6,0,0,0" ToolTip="Edit manual override" Click="EditHolidayOverride_Click" Foreground="#CC8A00"
+                                AutomationProperties.Name="Edit holiday override">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE70F;" FontSize="14" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </Button>
+                        <Button x:Name="DeleteHolidayOverrideButton" Style="{StaticResource GlyphIconButton}" Margin="4,0,0,0" ToolTip="Delete manual override" Click="DeleteHolidayOverride_Click" Foreground="#CC8A00"
+                                AutomationProperties.Name="Delete holiday override">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74D;" FontSize="14" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </Button>
+                    </StackPanel>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
@@ -141,6 +185,18 @@
                         <TextBlock x:Name="AccountTILValue" Text="00:00" />
                     </StackPanel>
                     <Button Content="Reset" Margin="12,0,0,0" Click="ResetTIL_Click" />
+                    <!-- Manual override indicator for TIL -->
+                    <StackPanel x:Name="TILOverridePanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0" Visibility="Collapsed">
+                        <TextBlock x:Name="TILOverrideLabel" Foreground="#0063B1" VerticalAlignment="Center"/>
+                        <Button x:Name="EditTILOverrideButton" Style="{StaticResource GlyphIconButton}" Margin="6,0,0,0" ToolTip="Edit manual override" Click="EditTILOverride_Click" Foreground="#0063B1"
+                                AutomationProperties.Name="Edit TIL override">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE70F;" FontSize="14" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </Button>
+                        <Button x:Name="DeleteTILOverrideButton" Style="{StaticResource GlyphIconButton}" Margin="4,0,0,0" ToolTip="Delete manual override" Click="DeleteTILOverride_Click" Foreground="#0063B1"
+                                AutomationProperties.Name="Delete TIL override">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74D;" FontSize="14" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </Button>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- Removed old buttons: View Log and Export year colour map (now in menu) -->

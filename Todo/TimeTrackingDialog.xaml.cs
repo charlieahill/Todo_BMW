@@ -49,17 +49,15 @@ namespace Todo
             {
                 if (File.Exists(WindowSettingsFile))
                 {
-                    var j = File.ReadAllText(WindowSettingsFile);
-                    var s = JsonSerializer.Deserialize<WindowSettings>(j);
-                    if (s != null)
+                    var j = JsonSerializer.Deserialize<WindowSettings>(File.ReadAllText(WindowSettingsFile));
+                    if (j != null)
                     {
                         this.WindowStartupLocation = WindowStartupLocation.Manual;
-                        this.Left = s.Left;
-                        this.Top = s.Top;
-                        this.Width = s.Width;
-                        this.Height = s.Height;
-                        // set state after bounds
-                        if (s.State == WindowState.Maximized)
+                        this.Left = j.Left;
+                        this.Top = j.Top;
+                        this.Width = j.Width;
+                        this.Height = j.Height;
+                        if (j.State == WindowState.Maximized)
                             this.WindowState = WindowState.Maximized;
                     }
                 }
@@ -308,6 +306,7 @@ namespace Todo
                 _activeDay = sel;
                 // update shift totals display for initial selection
                 UpdateShiftTotalsDisplay();
+                UpdateOverridePanels();
             }
 
             MonthGrid.Items.Refresh();
@@ -386,6 +385,7 @@ namespace Todo
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
                         UpdateShiftTotalsDisplay();
+                        UpdateOverridePanels();
                     }
                 }
             }
@@ -502,6 +502,7 @@ namespace Todo
                 // Recompute cumulatives and update accounts so UI reflects changes
                 RecomputeCumulatives();
                 UpdateAccountsDisplay();
+                UpdateOverridePanels();
             }
             catch { }
         }
@@ -736,10 +737,13 @@ namespace Todo
                  UpdateShiftTotalsDisplay();
                  // Also refresh accounts display
                  UpdateAccountsDisplay();
+                 // Update manual override indicator panels
+                 UpdateOverridePanels();
             }
             else
             {
                 _activeDay = null;
+                UpdateOverridePanels();
             }
         }
 
@@ -769,6 +773,7 @@ namespace Todo
                         UpdateShiftTotalsDisplay();
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
+                        UpdateOverridePanels();
                     }
                 }
             }
@@ -794,6 +799,7 @@ namespace Todo
                     UpdateShiftTotalsDisplay();
                     RecomputeCumulatives();
                     UpdateAccountsDisplay();
+                    UpdateOverridePanels();
                 }
             }
             catch (Exception ex)
@@ -830,6 +836,7 @@ namespace Todo
                         UpdateShiftTotalsDisplay();
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
+                        UpdateOverridePanels();
                     }
                 }
                 else
@@ -862,6 +869,7 @@ namespace Todo
                         UpdateShiftTotalsDisplay();
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
+                        UpdateOverridePanels();
                     }
                 }
                 else
@@ -894,6 +902,7 @@ namespace Todo
             }
             SaveCurrentDayEdits();
             UpdateShiftTotalsDisplay();
+            UpdateOverridePanels();
         }
 
         private void SaveDefaults_Click(object sender, RoutedEventArgs e)
@@ -915,6 +924,8 @@ namespace Todo
                     PopulateDaysForCurrentMonth();
                     RecomputeCumulatives();
                     UpdateAccountsDisplay();
+                    UpdateShiftTotalsDisplay();
+                    UpdateOverridePanels();
                     UpdateComboLists();
                 }
             }
@@ -940,6 +951,8 @@ namespace Todo
             {
                 var dlg = new AccountLogDialog() { Owner = this };
                 dlg.ShowDialog();
+                // refresh after closing log in case user changed anything there in future
+                UpdateOverridePanels();
             }
             catch { }
         }
@@ -1026,6 +1039,7 @@ namespace Todo
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
                         UpdateShiftTotalsDisplay();
+                        UpdateOverridePanels();
 
                         // also explicitly set account textblocks from service to ensure update
                         try
@@ -1128,6 +1142,7 @@ namespace Todo
                         RecomputeCumulatives();
                         UpdateAccountsDisplay();
                         UpdateShiftTotalsDisplay();
+                        UpdateOverridePanels();
 
                         // explicitly update account textblocks
                         try
@@ -1158,6 +1173,225 @@ namespace Todo
 
                     MessageBox.Show("Time in Lieu account updated.", "Reset", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
+            }
+            catch { }
+        }
+
+        // New: manual override summary and edit/delete controls
+        private void UpdateOverridePanels()
+        {
+            try
+            {
+                var holPanel = this.FindName("HolidayOverridePanel") as FrameworkElement;
+                var holLabel = this.FindName("HolidayOverrideLabel") as TextBlock;
+                var tilPanel = this.FindName("TILOverridePanel") as FrameworkElement;
+                var tilLabel = this.FindName("TILOverrideLabel") as TextBlock;
+
+                if (_activeDay == null)
+                {
+                    if (holPanel != null) holPanel.Visibility = Visibility.Collapsed;
+                    if (tilPanel != null) tilPanel.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                var date = _activeDay.Date.Date;
+                double hol = GetManualOverrideSumForDay(date, "Holiday");
+                double til = GetManualOverrideSumForDay(date, "TIL");
+
+                if (holPanel != null && holLabel != null)
+                {
+                    if (Math.Abs(hol) > 0.0001)
+                    {
+                        holPanel.Visibility = Visibility.Visible;
+                        holLabel.Text = $"Manual override: {hol:+0.##;-0.##;0} d";
+                    }
+                    else holPanel.Visibility = Visibility.Collapsed;
+                }
+                if (tilPanel != null && tilLabel != null)
+                {
+                    if (Math.Abs(til) > 0.0001)
+                    {
+                        tilPanel.Visibility = Visibility.Visible;
+                        tilLabel.Text = $"Manual override: {FormatHoursAsHHmm(til)}";
+                    }
+                    else tilPanel.Visibility = Visibility.Collapsed;
+                }
+            }
+            catch { }
+        }
+
+        private static double GetManualOverrideSumForDay(DateTime date, string kind)
+        {
+            try
+            {
+                var items = TimeTrackingService.Instance.GetAccountLogEntries(date, date, kind);
+                if (items == null) return 0;
+                return items.Where(a => (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0)
+                            .Sum(a => a.Delta);
+            }
+            catch { return 0; }
+        }
+
+        private void EditTILOverride_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_activeDay == null) return;
+                var current = GetManualOverrideSumForDay(_activeDay.Date.Date, "TIL");
+
+                var dlg = new Window
+                {
+                    Title = "Edit Time in Lieu manual override",
+                    SizeToContent = SizeToContent.WidthAndHeight,
+                    ResizeMode = ResizeMode.NoResize,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = this
+                };
+                var stack = new StackPanel { Margin = new Thickness(12) };
+                stack.Children.Add(new TextBlock { Text = "Enter total manual override for this day:" });
+                var inputPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0,8,0,8) };
+                var txt = new TextBox { Width = 160, Text = current.ToString("0.##", CultureInfo.CurrentCulture) };
+                inputPanel.Children.Add(txt);
+                inputPanel.Children.Add(new TextBlock { Text = " hours", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6,0,0,0) });
+                stack.Children.Add(inputPanel);
+                var btns = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+                var ok = new Button { Content = "OK", Width = 80, IsDefault = true, Margin = new Thickness(0,0,6,0) };
+                var cancel = new Button { Content = "Cancel", Width = 80, IsCancel = true };
+                btns.Children.Add(ok); btns.Children.Add(cancel); stack.Children.Add(btns);
+                dlg.Content = stack;
+
+                ok.Click += (s, ea) =>
+                {
+                    if (double.TryParse(txt.Text, NumberStyles.Any, CultureInfo.CurrentCulture, out var v)) { dlg.Tag = v; dlg.DialogResult = true; }
+                    else MessageBox.Show("Enter a valid number", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                };
+
+                if (dlg.ShowDialog() == true)
+                {
+                    var desired = (double)dlg.Tag;
+                    var diff = desired - current;
+                    if (Math.Abs(diff) > 0.0001)
+                    {
+                        var acc = TimeTrackingService.Instance.GetAccountState();
+                        acc.TILOffset += diff;
+                        TimeTrackingService.Instance.SetAccountState(acc);
+                        var entry = new AccountLogEntry { Date = _activeDay.Date.AddHours(12), Kind = "TIL", Delta = diff, Balance = acc.TILOffset, Note = "Manual override edit", AffectedDate = _activeDay.Date };
+                        TimeTrackingService.Instance.AddAccountLogEntry(entry);
+                        try { TimeTrackingService.Instance.Reload(); } catch { }
+                        RecomputeCumulatives();
+                        UpdateAccountsDisplay();
+                        UpdateShiftTotalsDisplay();
+                        UpdateOverridePanels();
+                        DaysList.Items.Refresh();
+                        MonthGrid.Items.Refresh();
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void DeleteTILOverride_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_activeDay == null) return;
+                var current = GetManualOverrideSumForDay(_activeDay.Date.Date, "TIL");
+                if (Math.Abs(current) < 0.0001) { UpdateOverridePanels(); return; }
+                if (MessageBox.Show("Delete manual override for this day?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                var acc = TimeTrackingService.Instance.GetAccountState();
+                acc.TILOffset -= current;
+                TimeTrackingService.Instance.SetAccountState(acc);
+                var entry = new AccountLogEntry { Date = _activeDay.Date.AddHours(12), Kind = "TIL", Delta = -current, Balance = acc.TILOffset, Note = "Manual override removed", AffectedDate = _activeDay.Date };
+                TimeTrackingService.Instance.AddAccountLogEntry(entry);
+                try { TimeTrackingService.Instance.Reload(); } catch { }
+                RecomputeCumulatives();
+                UpdateAccountsDisplay();
+                UpdateShiftTotalsDisplay();
+                UpdateOverridePanels();
+                DaysList.Items.Refresh();
+                MonthGrid.Items.Refresh();
+            }
+            catch { }
+        }
+
+        private void EditHolidayOverride_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_activeDay == null) return;
+                var current = GetManualOverrideSumForDay(_activeDay.Date.Date, "Holiday");
+
+                var dlg = new Window
+                {
+                    Title = "Edit Holiday manual override",
+                    SizeToContent = SizeToContent.WidthAndHeight,
+                    ResizeMode = ResizeMode.NoResize,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = this
+                };
+                var stack = new StackPanel { Margin = new Thickness(12) };
+                stack.Children.Add(new TextBlock { Text = "Enter total manual override for this day:" });
+                var inputPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0,8,0,8) };
+                var txt = new TextBox { Width = 160, Text = current.ToString("0.##", CultureInfo.CurrentCulture) };
+                inputPanel.Children.Add(txt);
+                inputPanel.Children.Add(new TextBlock { Text = " days", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6,0,0,0) });
+                stack.Children.Add(inputPanel);
+                var btns = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+                var ok = new Button { Content = "OK", Width = 80, IsDefault = true, Margin = new Thickness(0,0,6,0) };
+                var cancel = new Button { Content = "Cancel", Width = 80, IsCancel = true };
+                btns.Children.Add(ok); btns.Children.Add(cancel); stack.Children.Add(btns);
+                dlg.Content = stack;
+
+                ok.Click += (s, ea) =>
+                {
+                    if (double.TryParse(txt.Text, NumberStyles.Any, CultureInfo.CurrentCulture, out var v)) { dlg.Tag = v; dlg.DialogResult = true; }
+                    else MessageBox.Show("Enter a valid number", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                };
+
+                if (dlg.ShowDialog() == true)
+                {
+                    var desired = (double)dlg.Tag;
+                    var diff = desired - current;
+                    if (Math.Abs(diff) > 0.0001)
+                    {
+                        var acc = TimeTrackingService.Instance.GetAccountState();
+                        acc.HolidayOffset += diff;
+                        TimeTrackingService.Instance.SetAccountState(acc);
+                        var entry = new AccountLogEntry { Date = _activeDay.Date.AddHours(12), Kind = "Holiday", Delta = diff, Balance = acc.HolidayOffset, Note = "Manual override edit", AffectedDate = _activeDay.Date };
+                        TimeTrackingService.Instance.AddAccountLogEntry(entry);
+                        try { TimeTrackingService.Instance.Reload(); } catch { }
+                        RecomputeCumulatives();
+                        UpdateAccountsDisplay();
+                        UpdateShiftTotalsDisplay();
+                        UpdateOverridePanels();
+                        DaysList.Items.Refresh();
+                        MonthGrid.Items.Refresh();
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void DeleteHolidayOverride_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_activeDay == null) return;
+                var current = GetManualOverrideSumForDay(_activeDay.Date.Date, "Holiday");
+                if (Math.Abs(current) < 0.0001) { UpdateOverridePanels(); return; }
+                if (MessageBox.Show("Delete manual override for this day?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                var acc = TimeTrackingService.Instance.GetAccountState();
+                acc.HolidayOffset -= current;
+                TimeTrackingService.Instance.SetAccountState(acc);
+                var entry = new AccountLogEntry { Date = _activeDay.Date.AddHours(12), Kind = "Holiday", Delta = -current, Balance = acc.HolidayOffset, Note = "Manual override removed", AffectedDate = _activeDay.Date };
+                TimeTrackingService.Instance.AddAccountLogEntry(entry);
+                try { TimeTrackingService.Instance.Reload(); } catch { }
+                RecomputeCumulatives();
+                UpdateAccountsDisplay();
+                UpdateShiftTotalsDisplay();
+                UpdateOverridePanels();
+                DaysList.Items.Refresh();
+                MonthGrid.Items.Refresh();
             }
             catch { }
         }
@@ -1390,6 +1624,7 @@ namespace Todo
                 RecomputeCumulatives();
                 UpdateAccountsDisplay();
                 UpdateShiftTotalsDisplay();
+                UpdateOverridePanels();
                 MessageBox.Show("Import completed.", "Import", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
