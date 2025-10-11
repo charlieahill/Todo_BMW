@@ -777,15 +777,34 @@
                                 </Button>
                              </StackPanel>
 
-                            <!-- Date on the same row, right aligned -->
-                            <TextBlock Grid.Column="3"
-                                       Text="{Binding SetDate, StringFormat='{}{0:dd MMM yyyy}'}"
-                                       Foreground="Gray"
-                                       FontSize="12"
-                                       Margin="6,0,8,0"
-                                       VerticalAlignment="Center"
-                                       HorizontalAlignment="Right"
-                                       Visibility="{Binding ShowDate, Converter={StaticResource BoolToVis}}"/>
+                            <!-- Date or repository label on the same row, right aligned -->
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="6,0,8,0">
+                                <!-- Show date when SetDate is available -->
+                                <TextBlock Text="{Binding SetDate, StringFormat='{}{0:dd MMM yyyy}'}"
+                                           Foreground="Gray"
+                                           FontSize="12"
+                                           Visibility="{Binding ShowDate, Converter={StaticResource BoolToVis}}"/>
+                                <!-- Show 'repos' label for repository items in All view -->
+                                <TextBlock Text="repos"
+                                           Foreground="Gray"
+                                           FontSize="12"
+                                           Margin="6,0,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Window}}" Value="All"/>
+                                                        <Condition Binding="{Binding InRepository}" Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
 
                             <!-- ... Button -->
                             <Button Grid.Column="4" Content="..." Click="TaskOptionsButton_Click" Style="{StaticResource TaskOptionsButtonStyle}" Margin="0,0,2,0"/>

@@ -1403,8 +1403,10 @@ namespace Todo
         {
             TaskList.Clear();
 
-            // Build a sequence of tasks annotated with their source date key, excluding repository bucket
-            var entries = AllTasks.Where(kv => kv.Key != RepositoryKey).SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key })).ToList();
+            // Build a sequence of tasks annotated with their source key (date or repository)
+            var entries = AllTasks
+                .SelectMany(kv => kv.Value.Select(t => new { Task = t, DateKey = kv.Key }))
+                .ToList();
 
             if (!string.IsNullOrEmpty(term))
             {
@@ -1418,17 +1420,27 @@ namespace Todo
             {
                 var t = e.Task;
                 var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
-                // Set the date this task was stored under
-                if (DateTime.TryParseExact(e.DateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                if (e.DateKey == RepositoryKey)
                 {
-                    model.SetDate = dt.Date;
+                    // Show repository label instead of date
+                    model.InRepository = true;
+                    model.SetDate = null;
+                    model.ShowDate = true;
                 }
                 else
                 {
-                    model.SetDate = null;
+                    // Set the date this task was stored under
+                    if (DateTime.TryParseExact(e.DateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                    {
+                        model.SetDate = dt.Date;
+                    }
+                    else
+                    {
+                        model.SetDate = null;
+                    }
+                    // In All mode we want to show the date under each item
+                    model.ShowDate = true;
                 }
-                // In All mode we want to show the date under each item
-                model.ShowDate = true;
 
                 TaskList.Add(model);
             }

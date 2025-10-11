@@ -577,6 +577,18 @@ namespace Todo
             catch { }
         }
 
+        // New: remove all manual account log entries for a date and kind ("manual" present in Note)
+        public int RemoveManualAccountLogEntries(DateTime date, string kind)
+        {
+            try
+            {
+                int removed = _accountLog.RemoveAll(a => a.Date.Date == date.Date && (string.IsNullOrEmpty(kind) || string.Equals(a.Kind, kind, StringComparison.OrdinalIgnoreCase)) && (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (removed > 0) SaveAccountLog();
+                return removed;
+            }
+            catch { return 0; }
+        }
+
         // Public helper to reload persisted data from disk into the service singleton
         public void Reload()
         {

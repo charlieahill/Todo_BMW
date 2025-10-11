@@ -35,6 +35,12 @@ namespace Todo
             public string AffectedDateDisplay { get; set; }
         }
 
+        private static bool IsManualSet(AccountLogEntry a)
+        {
+            var n = a?.Note ?? string.Empty;
+            return n.IndexOf("manual set", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private void LoadItems()
         {
             var f = FromDatePicker.SelectedDate ?? DateTime.Today.AddYears(-1);
@@ -43,89 +49,36 @@ namespace Todo
             if (k == "(All)") k = null;
 
             // Get saved log entries (respecting kind filter)
-            var saved = TimeTrackingService.Instance.GetAccountLogEntries(f, t, k).ToList();
+            var saved = TimeTrackingService.Instance.GetAccountLogEntries(f, t, k).OrderBy(a => a.Date).ToList();
 
-            var combined = new List<AccountLogEntry>();
-            combined.AddRange(saved);
-
-            // If showing all kinds or specifically TIL, include generated per-day TIL deltas so users can see positive and negative daily changes
-            if (string.IsNullOrEmpty(k) || string.Equals(k, "TIL", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    var daySummaries = TimeTrackingService.Instance.GetDaySummaries(f, t).OrderBy(d => d.Date).ToList();
-                    foreach (var ds in daySummaries)
-                    {
-                        if (!ds.DeltaHours.HasValue) continue;
-                        var delta = ds.DeltaHours.Value;
-                        if (Math.Abs(delta) < 0.0001) continue; // skip zero deltas
-
-                        // create a generated account log entry for display/export purposes
-                        var gen = new AccountLogEntry
-                        {
-                            Date = ds.Date, // use the day date as the entry date
-                            Kind = "TIL",
-                            Delta = delta,
-                            Balance = double.NaN, // will be filled later when computing running balance
-                            Note = "Daily delta (computed)",
-                            AffectedDate = ds.Date
-                        };
-                        combined.Add(gen);
-                    }
-                }
-                catch { }
-            }
-
-            // We will compute running balances for TIL entries (saved + generated)
+            // Compute running balances for both TIL and Holiday entries (saved only)
             try
             {
-                // get all saved TIL entries (unfiltered) to determine previous balance state
-                var allSavedTIL = TimeTrackingService.Instance.GetAccountLogEntries(DateTime.MinValue, DateTime.MaxValue, "TIL").OrderBy(a => a.Date).ToList();
-                // find last saved TIL balance strictly before the display start
-                var lastBefore = allSavedTIL.Where(a => a.Date.Date < f.Date).OrderByDescending(a => a.Date).FirstOrDefault();
-                double startBalance = 0.0;
-                if (lastBefore != null)
-                {
-                    startBalance = lastBefore.Balance;
-                }
-                else
-                {
-                    // If no prior saved balance, attempt to use earliest saved TIL balance as a reference and roll back, otherwise use 0
-                    var earliestSaved = allSavedTIL.FirstOrDefault();
-                    if (earliestSaved != null)
-                    {
-                        // compute cumulative from earliestSaved up to entries we care about by treating earliestSaved as base
-                        // but for simplicity use 0 base when no prior saved balance exists
-                        startBalance = 0.0;
-                    }
-                    else
-                    {
-                        startBalance = 0.0;
-                    }
-                }
+                var asc = saved.OrderBy(a => a.Date).ThenBy(a => a.Kind).ToList();
 
-                // Build combined list ordered ascending for running calculation
-                var asc = combined.OrderBy(a => a.Date).ThenBy(a => a.Kind).ToList();
-                double running = 0.0; // running delta since startBalance
-                // If there is a saved 'lastBefore' we should incorporate any saved deltas between lastBefore and f, but since lastBefore is before f, running starts at 0
-                // Now process entries in chronological order and set Balance for TIL entries
+                double startTIL = ComputeStartRunning("TIL", f);
+                double startHol = ComputeStartRunning("Holiday", f);
+                double runningTIL = 0.0; double runningHol = 0.0;
+
                 foreach (var entry in asc)
                 {
                     if (string.Equals(entry.Kind, "TIL", StringComparison.OrdinalIgnoreCase))
                     {
-                        running += entry.Delta;
-                        entry.Balance = startBalance + running;
+                        if (IsManualSet(entry)) { runningTIL = 0.0; entry.Balance = startTIL + runningTIL; }
+                        else { runningTIL += entry.Delta; entry.Balance = startTIL + runningTIL; }
                     }
-                    // leave Holiday balances as-is (they already store Balance)
+                    else if (string.Equals(entry.Kind, "Holiday", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (IsManualSet(entry)) { runningHol = 0.0; entry.Balance = startHol + runningHol; }
+                        else { runningHol += entry.Delta; entry.Balance = startHol + runningHol; }
+                    }
                 }
 
-                // After computing, set the _currentLogItems to combined sorted descending for display
                 _currentLogItems = asc.OrderByDescending(a => a.Date).ThenByDescending(a => a.Kind).ToList();
             }
             catch
             {
-                // Fallback: show combined unsorted if computation fails
-                _currentLogItems = combined.OrderByDescending(a => a.Date).ThenByDescending(a => a.Kind).ToList();
+                _currentLogItems = saved.OrderByDescending(a => a.Date).ThenByDescending(a => a.Kind).ToList();
             }
 
             // Map to display entries with units for TIL/Holiday
@@ -142,6 +95,29 @@ namespace Todo
             LogList.ItemsSource = display;
         }
 
+        private static double ComputeStartRunning(string kind, DateTime startDate)
+        {
+            double running = 0.0;
+            try
+            {
+                var allBefore = TimeTrackingService.Instance.GetAccountLogEntries(DateTime.MinValue, startDate.AddDays(-1), kind).OrderBy(a => a.Date).ToList();
+                var lastSet = allBefore.Where(IsManualSet).OrderBy(a => a.Date).LastOrDefault();
+                if (lastSet != null)
+                {
+                    running = lastSet.Balance;
+                    foreach (var e in allBefore.Where(x => x.Date > lastSet.Date && !IsManualSet(x))) running += e.Delta;
+                }
+                else
+                {
+                    var acc = TimeTrackingService.Instance.GetAccountState();
+                    running = string.Equals(kind, "TIL", StringComparison.OrdinalIgnoreCase) ? acc.TILOffset : acc.HolidayOffset;
+                    foreach (var e in allBefore.Where(x => !IsManualSet(x))) running += e.Delta;
+                }
+            }
+            catch { }
+            return running;
+        }
+
         private string FormatDelta(AccountLogEntry a)
         {
             if (a == null) return string.Empty;
@@ -155,7 +131,6 @@ namespace Todo
         private string FormatBalance(AccountLogEntry a)
         {
             if (a == null) return string.Empty;
-            // If balance is NaN we treat it as unknown (shouldn't usually happen after computation)
             if (double.IsNaN(a.Balance)) return string.Empty;
             if (string.Equals(a.Kind, "TIL", StringComparison.OrdinalIgnoreCase))
                 return a.Balance.ToString("0.##") + "h";
@@ -183,7 +158,6 @@ namespace Todo
                         var date = a.Date.ToString("yyyy-MM-dd HH:mm");
                         var note = (a.Note ?? string.Empty).Replace("\"", "\"\"");
                         var affected = a.AffectedDate.HasValue ? a.AffectedDate.Value.ToString("yyyy-MM-dd") : string.Empty;
-                        // Format delta/balance with units for export (TIL -> hours 'h', Holiday -> days 'd')
                         var deltaStr = FormatDelta(a);
                         var balanceStr = FormatBalance(a);
                         sb.AppendLine($"\"{date}\",{a.Kind},{deltaStr},{balanceStr},\"{note}\",{affected}");
