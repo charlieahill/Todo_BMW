@@ -23,18 +23,30 @@ namespace Todo
             var set = new HashSet<int>(prechecked ?? Enumerable.Empty<int>());
             _years = years.Distinct().OrderBy(y => y).Select(y => new YearItem { Year = y, IsChecked = set.Contains(y) }).ToList();
             YearsList.ItemsSource = _years;
+            UpdateSelectAllState();
         }
 
-        private void CheckAll_Click(object sender, RoutedEventArgs e)
+        private void UpdateSelectAllState()
         {
-            foreach (var y in _years) y.IsChecked = true;
-            YearsList.Items.Refresh();
+            if (_years.Count == 0) { SelectAllYears.IsChecked = false; return; }
+            int checkedCount = _years.Count(y => y.IsChecked);
+            if (checkedCount == 0) SelectAllYears.IsChecked = false;
+            else if (checkedCount == _years.Count) SelectAllYears.IsChecked = true;
+            else SelectAllYears.IsChecked = null; // indeterminate
         }
 
-        private void UncheckAll_Click(object sender, RoutedEventArgs e)
+        private void SelectAllYears_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var y in _years) y.IsChecked = false;
+            bool? target = SelectAllYears.IsChecked;
+            bool value = target == true;
+            foreach (var y in _years) y.IsChecked = value;
             YearsList.Items.Refresh();
+            UpdateSelectAllState();
+        }
+
+        private void YearItem_CheckChanged(object sender, RoutedEventArgs e)
+        {
+            UpdateSelectAllState();
         }
 
         private void Ok_Click(object sender, RoutedEventArgs e)

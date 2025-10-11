@@ -1,22 +1,23 @@
 <Window x:Class="Todo.YearSelectionDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Select years" Height="420" Width="300" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+        Title="Select years" Height="420" Width="320" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <DockPanel Margin="10">
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,8">
-            <Button x:Name="CheckAllButton" Content="Check all" Width="90" Margin="0,0,6,0" Click="CheckAll_Click"/>
-            <Button x:Name="UncheckAllButton" Content="Uncheck all" Width="90" Click="UncheckAll_Click"/>
-        </StackPanel>
         <Border BorderBrush="#DDD" BorderThickness="1" Padding="6">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <ItemsControl x:Name="YearsList">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <CheckBox Content="{Binding Year}" IsChecked="{Binding IsChecked, Mode=TwoWay}" FontSize="14" Padding="4"/>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+            <StackPanel>
+                <!-- Select-all at the very top of the years column -->
+                <CheckBox x:Name="SelectAllYears" Content="Select all years" IsThreeState="True" Margin="0,0,0,6" Click="SelectAllYears_Click"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="YearsList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding Year}" IsChecked="{Binding IsChecked, Mode=TwoWay}" FontSize="14" Padding="4"
+                                          Checked="YearItem_CheckChanged" Unchecked="YearItem_CheckChanged"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
         </Border>
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button Content="OK" Width="80" Margin="0,0,6,0" IsDefault="True" Click="Ok_Click"/>

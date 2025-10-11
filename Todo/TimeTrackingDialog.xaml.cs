@@ -41,6 +41,14 @@ namespace Todo
             { DayType.Other, XColor.FromArgb(0xFF, 0xEF, 0xEF, 0xEF) }
         };
 
+        // Export map modes
+        private enum ExportMapMode
+        {
+            DayType,
+            PhysicalLocation,
+            OvertimeGradient
+        }
+
         public TimeTrackingDialog()
         {
             InitializeComponent();
@@ -654,7 +662,7 @@ namespace Todo
                 LocationCombo.Text = !string.IsNullOrWhiteSpace(vm.LocationOverride) ? vm.LocationOverride : vm.Template?.Location ?? "";
                 PhysicalLocationCombo.Text = !string.IsNullOrWhiteSpace(vm.PhysicalLocationOverride) ? vm.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(vm.LocationOverride) ? vm.LocationOverride : vm.Template?.Location ?? "");
                 ShiftsList.ItemsSource = vm.Shifts;
-                // Immediately set displayed total so it is visible even if UpdateShiftTotalsDisplay silently fails
+                // Immediately set displayed total so it is visible even if UpdateShiftTotals silently fails
                 try
                 {
                     double quickTotal = 0;
@@ -1072,14 +1080,23 @@ namespace Todo
                     return;
                 }
 
-                // Pick years
+                // Gather available years and open combined options dialog
                 var years = allDays.Select(d => d.Date.Year).Distinct().OrderBy(y => y).ToList();
-                var dlgYears = new YearSelectionDialog(years, new[] { DateTime.Today.Year }) { Owner = this };
-                if (dlgYears.ShowDialog() != true) return;
-                var selectedYears = dlgYears.SelectedYears;
+                var dlg = new ExportOptionsDialog(years, new[] { DateTime.Today.Year }, defaultDayType: false, defaultLocation: true, defaultOvertime: true) { Owner = this };
+                if (dlg.ShowDialog() != true) return;
+                var selectedYears = dlg.SelectedYears;
                 if (selectedYears == null || selectedYears.Count == 0)
                 {
                     MessageBox.Show("Select at least one year.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                bool includeDayType = dlg.IncludeDayType;
+                bool includeLocation = dlg.IncludeLocation;
+                bool includeOvertime = dlg.IncludeOvertime;
+                if (!includeDayType && !includeLocation && !includeOvertime)
+                {
+                    MessageBox.Show("Select at least one map type.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -1093,14 +1110,41 @@ namespace Todo
 
                 using (var doc = new PdfDocument())
                 {
-                    foreach (var y in selectedYears)
+                    // Group pages by map type first (type -> all years), then move to next type
+                    if (includeDayType)
                     {
-                        var page = doc.AddPage();
-                        using (var gfx = XGraphics.FromPdfPage(page))
+                        foreach (var y in selectedYears)
                         {
-                            DrawYearGridToGraphics(gfx, allDays, y, ColorByPhysicalLocation);
+                            var page = doc.AddPage();
+                            using (var gfx = XGraphics.FromPdfPage(page))
+                            {
+                                DrawYearGridToGraphics(gfx, allDays, y, ExportMapMode.DayType);
+                            }
                         }
                     }
+                    if (includeLocation)
+                    {
+                        foreach (var y in selectedYears)
+                        {
+                            var page = doc.AddPage();
+                            using (var gfx = XGraphics.FromPdfPage(page))
+                            {
+                                DrawYearGridToGraphics(gfx, allDays, y, ExportMapMode.PhysicalLocation);
+                            }
+                        }
+                    }
+                    if (includeOvertime)
+                    {
+                        foreach (var y in selectedYears)
+                        {
+                            var page = doc.AddPage();
+                            using (var gfx = XGraphics.FromPdfPage(page))
+                            {
+                                DrawYearGridToGraphics(gfx, allDays, y, ExportMapMode.OvertimeGradient);
+                            }
+                        }
+                    }
+
                     doc.Save(sfd.FileName);
                 }
 
@@ -1134,371 +1178,10 @@ namespace Todo
             catch { }
         }
 
-        public static string FormatHoursAsHHmm(double hours)
-        {
-            try
-            {
-                var ts = TimeSpan.FromHours(hours);
-                var sign = ts.Ticks < 0 ? "-" : "";
-                ts = new TimeSpan(Math.Abs(ts.Ticks));
-                return sign + ((int)ts.TotalHours).ToString("00") + ":" + ts.Minutes.ToString("00");
-            }
-            catch { return "00:00"; }
-        }
-
-        // Manual override summary panel updater
-        private void UpdateOverridePanels()
-        {
-            try
-            {
-                var holPanel = this.FindName("HolidayOverridePanel") as FrameworkElement;
-                var holLabel = this.FindName("HolidayOverrideLabel") as TextBlock;
-                var tilPanel = this.FindName("TILOverridePanel") as FrameworkElement;
-                var tilLabel = this.FindName("TILOverrideLabel") as TextBlock;
-
-                if (_activeDay == null)
-                {
-                    if (holPanel != null) holPanel.Visibility = Visibility.Collapsed;
-                    if (tilPanel != null) tilPanel.Visibility = Visibility.Collapsed;
-                    return;
-                }
-
-                var date = _activeDay.Date.Date;
-
-                // Holiday: prefer showing a "manual set" if present; otherwise show non-zero manual delta sum
-                var holSet = GetManualSetForDay(date, "Holiday");
-                double holDelta = GetManualOverrideSumForDay(date, "Holiday");
-                if (holPanel != null && holLabel != null)
-                {
-                    if (holSet != null)
-                    {
-                        holPanel.Visibility = Visibility.Visible;
-                        holLabel.Text = $"Manual set to: {holSet.Balance:0.##} d";
-                    }
-                    else if (Math.Abs(holDelta) > 0.0001)
-                    {
-                        holPanel.Visibility = Visibility.Visible;
-                        holLabel.Text = $"Manual override: {holDelta:+0.##;-0.##;0} d";
-                    }
-                    else
-                    {
-                        holPanel.Visibility = Visibility.Collapsed;
-                    }
-                }
-
-                // TIL: prefer showing a "manual set" if present; otherwise show non-zero manual delta sum
-                var tilSet = GetManualSetForDay(date, "TIL");
-                double tilDelta = GetManualOverrideSumForDay(date, "TIL");
-                if (tilPanel != null && tilLabel != null)
-                {
-                    if (tilSet != null)
-                    {
-                        tilPanel.Visibility = Visibility.Visible;
-                        tilLabel.Text = $"Manual set to: {FormatHoursAsHHmm(tilSet.Balance)}";
-                    }
-                    else if (Math.Abs(tilDelta) > 0.0001)
-                    {
-                        tilPanel.Visibility = Visibility.Visible;
-                        tilLabel.Text = $"Manual override: {FormatHoursAsHHmm(tilDelta)}";
-                    }
-                    else
-                    {
-                        tilPanel.Visibility = Visibility.Collapsed;
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private static AccountLogEntry GetManualSetForDay(DateTime date, string kind)
-        {
-            try
-            {
-                var items = TimeTrackingService.Instance.GetAccountLogEntries(date, date, kind);
-                if (items == null) return null;
-                return items.Where(a => (a.Note ?? string.Empty).IndexOf("manual set", StringComparison.OrdinalIgnoreCase) >= 0)
-                            .OrderBy(a => a.Date)
-                            .LastOrDefault();
-            }
-            catch { return null; }
-        }
-
-        private static double GetManualOverrideSumForDay(DateTime date, string kind)
-        {
-            try
-            {
-                var items = TimeTrackingService.Instance.GetAccountLogEntries(date, date, kind);
-                if (items == null) return 0;
-                return items.Where(a => (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0)
-                            .Sum(a => a.Delta);
-            }
-            catch { return 0; }
-        }
-
-        private void ImportExcel_Click(object sender, RoutedEventArgs e)
-        {
-            MessageBox.Show("Import from Excel is not implemented yet.", "Import", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-
-        private void ExportExcel_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Persist any pending edits so recalculation sees latest
-                SaveCurrentDayEdits();
-
-                // Recalculate across all known days using the same logic as the UI
-                var all = RecalculateAllDaysAndBalances();
-                if (all == null || all.Count == 0)
-                {
-                    MessageBox.Show("No data to export.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-                var ordered = all.OrderBy(d => d.Date).ToList();
-
-                var dlg = new SaveFileDialog { Filter = "Excel Workbook (*.xlsx)|*.xlsx", FileName = "TimeTracking.xlsx" };
-                if (dlg.ShowDialog(this) != true) return;
-
-                using (var wb = new XLWorkbook())
-                {
-                    var ws = wb.Worksheets.Add("Days");
-                    // Header
-                    var headers = new List<string>
-                    {
-                        "Date","Weekday","Employment Position","Location","Physical Location","Day Type","Target Hours","Worked Hours","Delta","Delta Holiday","Cumulative TIL","Cumulative Holiday",
-                        "Manual Reset TIL","Manual Reset Holiday","Manual Reset Notes",
-                        "Start1","End1","Lunch1","Desc1",
-                        "Start2","End2","Lunch2","Desc2",
-                        "Start3","End3","Lunch3","Desc3",
-                        "Start4","End4","Lunch4","Desc4"
-                    };
-                    for (int i = 0; i < headers.Count; i++) ws.Cell(1, i + 1).Value = headers[i];
-                    ws.Row(1).Style.Font.Bold = true;
-                    ws.SheetView.FreezeRows(1);
-
-                    // cache manual reset log entries by date for the full exported range
-                    var from = ordered.First().Date.Date;
-                    var to = ordered.Last().Date.Date;
-                    var allLog = TimeTrackingService.Instance.GetAccountLogEntries(from, to, null);
-
-                    int row = 2;
-                    foreach (var d in ordered)
-                    {
-                        ws.Cell(row, 1).Value = d.Date; ws.Cell(row, 1).Style.DateFormat.Format = "yyyy-MM-dd";
-                        ws.Cell(row, 2).Value = d.Date.ToString("dddd");
-                        ws.Cell(row, 3).Value = d.PositionOverride ?? d.Template?.JobDescription ?? string.Empty;
-                        ws.Cell(row, 4).Value = d.LocationOverride ?? d.Template?.Location ?? string.Empty;
-                        ws.Cell(row, 5).Value = d.PhysicalLocationOverride ?? (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? string.Empty);
-                        ws.Cell(row, 6).Value = d.DayType.ToString();
-                        ws.Cell(row, 7).Value = d.TargetComputed; ws.Cell(row, 7).Style.NumberFormat.Format = "0.00";
-                        ws.Cell(row, 8).Value = d.Worked; ws.Cell(row, 8).Style.NumberFormat.Format = "0.00";
-                        // Signed delta to reflect TIL increase/decrease
-                        double tilDelta = d.Worked - d.TargetComputed;
-                        ws.Cell(row, 9).Value = tilDelta; ws.Cell(row, 9).Style.NumberFormat.Format = "0.00";
-                        double deltaHoliday = d.DayType == DayType.Vacation ? -1.0 : 0.0;
-                        ws.Cell(row, 10).Value = deltaHoliday; ws.Cell(row, 10).Style.NumberFormat.Format = "0.00";
-                        // Use the already-computed cumulative balances from the recalculation
-                        ws.Cell(row, 11).Value = d.CumulativeTIL; ws.Cell(row, 11).Style.NumberFormat.Format = "0.00";
-                        ws.Cell(row, 12).Value = d.CumulativeHoliday; ws.Cell(row, 12).Style.NumberFormat.Format = "0.00";
-
-                        var dayLogs = allLog.Where(a => a.Date.Date == d.Date.Date && (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
-                        double tilReset = dayLogs.Where(a => string.Equals(a.Kind, "TIL", StringComparison.OrdinalIgnoreCase)).Sum(a => a.Delta);
-                        double holReset = dayLogs.Where(a => string.Equals(a.Kind, "Holiday", StringComparison.OrdinalIgnoreCase)).Sum(a => a.Delta);
-                        string notes = string.Join("; ", dayLogs.Select(a => (a.Kind ?? "") + ": " + a.Delta.ToString("0.##") + (string.IsNullOrWhiteSpace(a.Note) ? "" : " (" + a.Note + ")")));
-                        ws.Cell(row, 13).Value = tilReset; ws.Cell(row, 13).Style.NumberFormat.Format = "0.00";
-                        ws.Cell(row, 14).Value = holReset; ws.Cell(row, 14).Style.NumberFormat.Format = "0.00";
-                        ws.Cell(row, 15).Value = notes;
-
-                        var shifts = (d.Shifts ?? new List<Shift>()).OrderBy(s => s.Start).ToList();
-                        for (int i = 0; i < Math.Min(4, shifts.Count); i++)
-                        {
-                            int c = 16 + i * 4;
-                            ws.Cell(row, c + 0).Value = shifts[i].Start.ToString(@"hh\:mm");
-                            ws.Cell(row, c + 1).Value = shifts[i].End.ToString(@"hh\:mm");
-                            ws.Cell(row, c + 2).Value = shifts[i].LunchBreak.ToString(@"hh\:mm");
-                            ws.Cell(row, c + 3).Value = shifts[i].Description ?? string.Empty;
-                        }
-
-                        if (d.DayType != DayType.WorkingDay)
-                        {
-                            var xlColor = DayTypeToXlColor(d.DayType); if (xlColor != null) ws.Row(row).Style.Fill.SetBackgroundColor(xlColor);
-                        }
-                        row++;
-                    }
-
-                    ws.Columns().AdjustToContents();
-
-                    // Manual Resets sheet for full range
-                    var logWs = wb.Worksheets.Add("ManualResets");
-                    logWs.Cell(1, 1).Value = "Date"; logWs.Cell(1, 2).Value = "Kind"; logWs.Cell(1, 3).Value = "Delta"; logWs.Cell(1, 4).Value = "Balance"; logWs.Cell(1, 5).Value = "Note"; logWs.Cell(1, 6).Value = "AffectedDate"; logWs.Row(1).Style.Font.Bold = true;
-                    int lr = 2; foreach (var a in TimeTrackingService.Instance.GetAccountLogEntries(from, to, null).Where(a => (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0))
-                    {
-                        logWs.Cell(lr, 1).Value = a.Date; logWs.Cell(lr, 1).Style.DateFormat.Format = "yyyy-MM-dd HH:mm";
-                        logWs.Cell(lr, 2).Value = a.Kind; logWs.Cell(lr, 3).Value = a.Delta; logWs.Cell(lr, 3).Style.NumberFormat.Format = "0.00";
-                        logWs.Cell(lr, 4).Value = a.Balance; logWs.Cell(lr, 4).Style.NumberFormat.Format = "0.00";
-                        logWs.Cell(lr, 5).Value = a.Note ?? string.Empty; logWs.Cell(lr, 6).Value = a.AffectedDate.HasValue ? a.AffectedDate.Value.ToString("yyyy-MM-dd") : string.Empty; lr++;
-                    }
-                    logWs.Columns().AdjustToContents();
-
-                    wb.SaveAs(dlg.FileName);
-                }
-                MessageBox.Show("Exported to Excel.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex) { MessageBox.Show("Failed to export: " + ex.Message, "Export", MessageBoxButton.OK, MessageBoxImage.Error); }
-        }
-
-        private List<DayViewModel> BuildAllDaysAcrossData()
-        {
-            var days = new List<DayViewModel>();
-            try
-            {
-                DateTime? min = null; DateTime? max = null;
-                try { var events = TimeTrackingService.Instance.GetEvents(); if (events != null && events.Count > 0) { var mn = events.Min(e => e.Timestamp.Date); var mx = events.Max(e => e.Timestamp.Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : max) : mx; } } catch { }
-                try { var sh = TimeTrackingService.Instance.GetAllSavedShifts(); if (sh != null && sh.Count > 0) { var mn = sh.Min(s => s.Date.Date); var mx = sh.Max(s => s.Date.Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
-                try { var ov = TimeTrackingService.Instance.GetOverrides(); if (ov != null && ov.Count > 0) { var mn = ov.Min(o => o.Date.Date); var mx = ov.Max(o => o.Date.Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
-                try { var tmps = TimeTrackingService.Instance.GetTemplates(); if (tmps != null && tmps.Count > 0) { var mn = tmps.Min(t => t.StartDate.Date); var mx = tmps.Max(t => (t.EndDate ?? DateTime.Today).Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
-                if (!min.HasValue || !max.HasValue)
-                {
-                    var f = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1); var l = f.AddMonths(1).AddDays(-1); var summaries0 = TimeTrackingService.Instance.GetDaySummaries(f, l); days = summaries0.Select(s => new DayViewModel(s)).ToList();
-                }
-                else { var summaries = TimeTrackingService.Instance.GetDaySummaries(min.Value, max.Value); days = summaries.Select(s => new DayViewModel(s)).ToList(); }
-
-                var ordered = days.OrderBy(d => d.Date).ToList();
-                foreach (var d in ordered)
-                {
-                    var ov = TimeTrackingService.Instance.GetOverrideForDate(d.Date);
-                    if (ov != null)
-                    {
-                        d.PositionOverride = ov.Position; d.LocationOverride = ov.Location; d.PhysicalLocationOverride = string.IsNullOrWhiteSpace(ov.PhysicalLocation) ? (string.IsNullOrWhiteSpace(ov.Location) ? d.Template?.Location : ov.Location) : ov.PhysicalLocation; d.TargetHours = ov.TargetHours; if (ov.DayType.HasValue) d.SetDayType(ov.DayType.Value);
-                    }
-                    else if (d.Template != null && !string.IsNullOrWhiteSpace(d.Template.Location)) d.PhysicalLocationOverride = d.Template.Location;
-                    var shs = TimeTrackingService.Instance.GetShiftsForDate(d.Date).ToList(); d.Shifts = shs.Any() ? shs.Select(s2 => new Shift { Date = s2.Date, Start = s2.Start, End = s2.End, Description = s2.Description, DayMode = s2.DayMode, ManualStartOverride = s2.ManualStartOverride, ManualEndOverride = s2.ManualEndOverride, LunchBreak = s2.LunchBreak }).ToList() : new List<Shift>();
-                }
-                days = ordered;
-            }
-            catch { }
-            return days;
-        }
-
-        private XLColor? DayTypeToXlColor(DayType dt)
-        {
-            switch (dt)
-            {
-                case DayType.Weekend: return XLColor.FromHtml("#F0F0F0");
-                case DayType.PublicHoliday: return XLColor.FromHtml("#FFE5E5");
-                case DayType.Vacation: return XLColor.FromHtml("#DDEEFF");
-                case DayType.TimeInLieu: return XLColor.FromHtml("#FFF2CC");
-                case DayType.Other: return XLColor.FromHtml("#EFEFEF");
-                default: return null;
-            }
-        }
-
-        private IEnumerable<int> GetAvailableYears()
-        {
-            var years = new HashSet<int>();
-            try
-            {
-                var events = TimeTrackingService.Instance.GetEvents();
-                if (events != null) foreach (var e in events) years.Add(e.Timestamp.Year);
-            }
-            catch { }
-            try
-            {
-                var sh = TimeTrackingService.Instance.GetAllSavedShifts();
-                if (sh != null) foreach (var s in sh) years.Add(s.Date.Year);
-            }
-            catch { }
-            try
-            {
-                var ov = TimeTrackingService.Instance.GetOverrides();
-                if (ov != null) foreach (var o in ov) years.Add(o.Date.Year);
-            }
-            catch { }
-            try
-            {
-                var tmps = TimeTrackingService.Instance.GetTemplates();
-                if (tmps != null)
-                {
-                    foreach (var t in tmps)
-                    {
-                        var startY = t.StartDate.Year; var endY = (t.EndDate ?? DateTime.Today).Year;
-                        for (int y = startY; y <= endY; y++) years.Add(y);
-                    }
-                }
-            }
-            catch { }
-
-            try { years.Add(DateTime.Today.Year); } catch { }
-            if (YearCombo.SelectedItem is string ys && int.TryParse(ys, out var comboYear)) years.Add(comboYear);
-
-            return years.OrderBy(y => y);
-        }
-
-        private void DrawYearGridToGraphics(XGraphics g, List<DayViewModel> days, int year, bool colorByPhysical)
-        {
-            double margin = 30; double pageWidth = g.PageSize.Width; double pageHeight = g.PageSize.Height; double contentWidth = pageWidth - (margin * 2); double legendHeight = 70;
-            var headerFont = new XFont("Arial", 18, XFontStyle.Bold);
-            g.DrawString((colorByPhysical ? "Physical location map - " : "Day type map - ") + year.ToString(), headerFont, XBrushes.Black, new XRect(margin, 10, contentWidth, 30), XStringFormats.TopLeft);
-            int cols = 3; int rows = 4; double gap = 8; double monthWidth = (contentWidth - (gap * (cols - 1))) / cols; double monthGridAvailableHeight = pageHeight - 80 - legendHeight - (gap * (rows - 1)); double monthHeight = monthGridAvailableHeight / rows;
-            for (int m = 1; m <= 12; m++)
-            {
-                int monthIndex = m - 1; int col = monthIndex % cols; int row = monthIndex / cols; double x = margin + col * (monthWidth + gap); double y = 50 + row * (monthHeight + gap);
-                DrawSingleMonth(g, days, year, m, new XRect(x, y, monthWidth, monthHeight), colorByPhysical);
-            }
-            DrawLegend(g, margin, pageHeight - legendHeight + 12, colorByPhysical, days, contentWidth);
-        }
-
-        private void DrawSingleMonth(XGraphics g, List<DayViewModel> days, int year, int month, XRect rect, bool colorByPhysical)
-        {
-            var monthName = CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(month);
-            var titleFont = new XFont("Arial", 12, XFontStyle.Bold);
-            g.DrawString(monthName + " " + year.ToString(), titleFont, XBrushes.Black, new XPoint(rect.X + 4, rect.Y + 14));
-            double top = rect.Y + 22; double left = rect.X + 2; double gridWidth = rect.Width - 4; double gridHeight = rect.Height - 28; int cols = 7; int rows = 6; double cellW = gridWidth / cols; double cellH = gridHeight / rows; var first = new DateTime(year, month, 1); int leading = (int)first.DayOfWeek - 1; if (leading < 0) leading += 7;
-            for (int i = 0; i < rows * cols; i++)
-            {
-                int dayNum = i - leading + 1; double cx = left + (i % cols) * cellW; double cy = top + (i / cols) * cellH; var cellRect = new XRect(cx, cy, cellW - 1, cellH - 1);
-                if (dayNum >= 1 && dayNum <= DateTime.DaysInMonth(year, month))
-                {
-                    var d = days.FirstOrDefault(dd => dd.Date.Year == year && dd.Date.Month == month && dd.Date.Day == dayNum);
-                    XBrush brush = XBrushes.White;
-                    if (d != null)
-                    {
-                        if (colorByPhysical)
-                        {
-                            var key = !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) ? d.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? string.Empty);
-                            if (string.IsNullOrWhiteSpace(key)) brush = XBrushes.White;
-                            else
-                            {
-                                var hex = TimeTrackingService.Instance.GetLocationColor(key);
-                                if (!string.IsNullOrWhiteSpace(hex))
-                                {
-                                    try { var sysc = (Color)ColorConverter.ConvertFromString(hex); brush = new XSolidBrush(XColor.FromArgb(sysc.A, sysc.R, sysc.G, sysc.B)); }
-                                    catch { brush = XBrushes.White; }
-                                }
-                                else
-                                {
-                                    int h = key.GetHashCode(); byte r = (byte)(80 + (Math.Abs(h) % 176)); byte gcol = (byte)(80 + (Math.Abs(h / 7) % 176)); byte b = (byte)(80 + (Math.Abs(h / 13) % 176)); brush = new XSolidBrush(XColor.FromArgb(255, r, gcol, b));
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (DayTypePdfColors.TryGetValue(d.DayType, out var c)) brush = new XSolidBrush(c); else brush = XBrushes.White;
-                        }
-                    }
-                    g.DrawRectangle(brush, cellRect);
-                    var numFont = new XFont("Arial", 8, XFontStyle.Regular);
-                    g.DrawString(dayNum.ToString(), numFont, XBrushes.Black, new XPoint(cellRect.X + 4, cellRect.Y + 10));
-                }
-                else g.DrawRectangle(XBrushes.LightGray, cellRect);
-            }
-            g.DrawRectangle(XPens.Black, rect.X, rect.Y, rect.Width, rect.Height);
-        }
-
-        private void DrawLegend(XGraphics g, double x, double y, bool colorByPhysical, List<DayViewModel> days, double availableWidth)
+        private void DrawLegend(XGraphics g, double x, double y, ExportMapMode mode, List<DayViewModel> days, double availableWidth, int year)
         {
             var font = new XFont("Arial", 9, XFontStyle.Regular); double box = 12; double gap = 8; double cx = x; double startX = x; double padding = 6;
-            if (!colorByPhysical)
+            if (mode == ExportMapMode.DayType)
             {
                 var items = DayTypePdfColors.Keys.Select(k => k.ToString()).ToList();
                 var widths = items.Select(it => g.MeasureString(it, font).Width + box + gap + padding).ToList(); double totalW = widths.Sum(); cx = startX + Math.Max(0, (availableWidth - totalW) / 2);
@@ -1508,32 +1191,101 @@ namespace Todo
                     g.DrawRectangle(brush, cx, y, box, box); g.DrawString(key, font, XBrushes.Black, new XPoint(cx + box + 6, y + box - 2)); cx += widths[i];
                 }
             }
-            else
+            else if (mode == ExportMapMode.PhysicalLocation)
             {
-                List<string> locs = days.Where(d => !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) || !string.IsNullOrWhiteSpace(d.LocationOverride) || !string.IsNullOrWhiteSpace(d.Template?.Location))
+                // Use persisted or generated-persisted colors and ensure wrapping/fit
+                var locFont = new XFont("Arial", 8, XFontStyle.Regular);
+                List<string> locs = days.Where(d => d.Date.Year == year)
+                                         .Where(d => !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) || !string.IsNullOrWhiteSpace(d.LocationOverride) || !string.IsNullOrWhiteSpace(d.Template?.Location))
                                          .Select(d => !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) ? d.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? ""))
                                          .Where(s => !string.IsNullOrWhiteSpace(s))
                                          .GroupBy(s => s).OrderByDescending(gp => gp.Count()).Select(gp => gp.Key).ToList();
                 int max = Math.Min(8, locs.Count);
-                var widths = new List<double>();
-                for (int i = 0; i < max; i++) widths.Add(g.MeasureString(locs[i], font).Width + box + gap + padding);
-                double totalW = widths.Sum(); cx = startX + Math.Max(0, (availableWidth - totalW) / 2);
+
+                double curX = startX;
+                double curY = y;
+                double lineH = box + 6;
+
                 for (int i = 0; i < max; i++)
                 {
                     var key = locs[i];
-                    var hex = TimeTrackingService.Instance.GetLocationColor(key);
+                    var hex = TimeTrackingService.Instance.GetOrCreateLocationColor(key);
                     XBrush brush;
                     if (!string.IsNullOrWhiteSpace(hex))
                     {
                         try { var sysc = (Color)ColorConverter.ConvertFromString(hex); brush = new XSolidBrush(XColor.FromArgb(sysc.A, sysc.R, sysc.G, sysc.B)); }
                         catch { brush = XBrushes.White; }
                     }
-                    else
+                    else brush = XBrushes.White;
+
+                    // Measure and shrink-to-fit if a single item is wider than available width
+                    XFont itemFont = locFont;
+                    double labelWidth = g.MeasureString(key, itemFont).Width;
+                    double itemWidth = box + gap + labelWidth + padding;
+                    if (itemWidth > availableWidth)
                     {
-                        int h = key.GetHashCode(); byte r = (byte)(80 + (Math.Abs(h) % 176)); byte gcol = (byte)(80 + (Math.Abs(h / 7) % 176)); byte b = (byte)(80 + (Math.Abs(h / 13) % 176)); brush = new XSolidBrush(XColor.FromArgb(255, r, gcol, b));
+                        for (int sz = 7; sz >= 6; sz--)
+                        {
+                            var tryFont = new XFont("Arial", sz, XFontStyle.Regular);
+                            var w = g.MeasureString(key, tryFont).Width + box + gap + padding;
+                            if (w <= availableWidth)
+                            {
+                                itemFont = tryFont; itemWidth = w; break;
+                            }
+                        }
                     }
-                    g.DrawRectangle(brush, cx, y, box, box); g.DrawString(key, font, XBrushes.Black, new XPoint(cx + box + 6, y + box - 2)); cx += widths[i];
+
+                    if (curX + itemWidth > startX + availableWidth)
+                    {
+                        curX = startX;
+                        curY += lineH;
+                    }
+
+                    g.DrawRectangle(brush, curX, curY, box, box);
+                    g.DrawString(key, itemFont, XBrushes.Black, new XPoint(curX + box + 6, curY + box - 2));
+                    curX += itemWidth;
                 }
+            }
+            else
+            {
+                // Overtime legend: red (-4h) .. white (0) .. green (+4h)
+                double gradW = Math.Min(300, availableWidth - 160);
+                double gradH = box;
+                double startXGrad = x + (availableWidth - gradW) / 2;
+                int steps = 60;
+                for (int i = 0; i < steps; i++)
+                {
+                    double t = (double)i / (steps - 1); // 0..1
+                    double delta = (t - 0.5) * 8.0; // -4..+4
+                    var brush = GetOvertimeBrush(delta);
+                    g.DrawRectangle(brush, startXGrad + i * (gradW / steps), y, gradW / steps + 0.5, gradH);
+                }
+                var small = new XFont("Arial", 8, XFontStyle.Regular);
+                g.DrawString("-4h", small, XBrushes.Black, new XPoint(startXGrad - 20, y + box + 12));
+                g.DrawString("0", small, XBrushes.Black, new XPoint(startXGrad + gradW / 2 - 4, y + box + 12));
+                g.DrawString("+4h", small, XBrushes.Black, new XPoint(startXGrad + gradW + 4, y + box + 12));
+            }
+        }
+
+        private XBrush GetOvertimeBrush(double delta)
+        {
+            double maxAbs = 4.0;
+            double t;
+            if (delta >= 0)
+            {
+                t = Math.Min(delta / maxAbs, 1.0);
+                byte r = (byte)(255 - (int)(t * (255 - 0x2E)));
+                byte g = (byte)(255 - (int)(t * (255 - 0xCC)));
+                byte b = (byte)(255 - (int)(t * (255 - 0x71)));
+                return new XSolidBrush(XColor.FromArgb(255, r, g, b));
+            }
+            else
+            {
+                t = Math.Min((-delta) / maxAbs, 1.0);
+                byte r = (byte)(255 - (int)(t * (255 - 0xFF)));
+                byte g = (byte)(255 - (int)(t * (255 - 0x6B)));
+                byte b = (byte)(255 - (int)(t * (255 - 0x6B)));
+                return new XSolidBrush(XColor.FromArgb(255, r, g, b));
             }
         }
 
@@ -1565,7 +1317,6 @@ namespace Todo
             catch { }
         }
 
-        // Update totals display section when shifts/targets change
         private void UpdateShiftTotalsDisplay()
         {
             try
@@ -1605,7 +1356,6 @@ namespace Todo
                     target = 0;
                 }
 
-                // Signed delta: positive = extra hours, negative = shortfall
                 double delta = totalWorked - target;
 
                 if (this.FindName("TotalWorkedDataTextBlock") is TextBlock tw2)
@@ -1617,7 +1367,7 @@ namespace Todo
                     if (explicitOverride)
                         st2.Text = target.ToString("0.##");
                     else
-                        st2.Text = target > 0 ? target.ToString("0.##") : "0"; // show 0 when it is auto-zero due to holiday/public holiday
+                        st2.Text = target > 0 ? target.ToString("0.##") : "0";
                 }
             }
             catch { }
@@ -1772,6 +1522,347 @@ namespace Todo
             }
             catch { }
         }
+
+        // Restored helpers required by XAML and other methods
+        public static string FormatHoursAsHHmm(double hours)
+        {
+            try
+            {
+                var ts = TimeSpan.FromHours(hours);
+                var sign = ts.Ticks < 0 ? "-" : "";
+                ts = new TimeSpan(Math.Abs(ts.Ticks));
+                return sign + ((int)ts.TotalHours).ToString("00") + ":" + ts.Minutes.ToString("00");
+            }
+            catch { return "00:00"; }
+        }
+
+        private void UpdateOverridePanels()
+        {
+            try
+            {
+                var holPanel = this.FindName("HolidayOverridePanel") as FrameworkElement;
+                var holLabel = this.FindName("HolidayOverrideLabel") as TextBlock;
+                var tilPanel = this.FindName("TILOverridePanel") as FrameworkElement;
+                var tilLabel = this.FindName("TILOverrideLabel") as TextBlock;
+
+                if (_activeDay == null)
+                {
+                    if (holPanel != null) holPanel.Visibility = Visibility.Collapsed;
+                    if (tilPanel != null) tilPanel.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                var date = _activeDay.Date.Date;
+
+                // Holiday panel
+                var holSet = GetManualSetForDay(date, "Holiday");
+                double holDelta = GetManualOverrideSumForDay(date, "Holiday");
+                if (holPanel != null && holLabel != null)
+                {
+                    if (holSet != null)
+                    {
+                        holPanel.Visibility = Visibility.Visible;
+                        holLabel.Text = $"Manual set to: {holSet.Balance:0.##} d";
+                    }
+                    else if (Math.Abs(holDelta) > 0.0001)
+                    {
+                        holPanel.Visibility = Visibility.Visible;
+                        holLabel.Text = $"Manual override: {holDelta:+0.##;-0.##;0} d";
+                    }
+                    else
+                    {
+                        holPanel.Visibility = Visibility.Collapsed;
+                    }
+                }
+
+                // TIL panel
+                var tilSet = GetManualSetForDay(date, "TIL");
+                double tilDelta = GetManualOverrideSumForDay(date, "TIL");
+                if (tilPanel != null && tilLabel != null)
+                {
+                    if (tilSet != null)
+                    {
+                        tilPanel.Visibility = Visibility.Visible;
+                        tilLabel.Text = $"Manual set to: {FormatHoursAsHHmm(tilSet.Balance)}";
+                    }
+                    else if (Math.Abs(tilDelta) > 0.0001)
+                    {
+                        tilPanel.Visibility = Visibility.Visible;
+                        tilLabel.Text = $"Manual override: {FormatHoursAsHHmm(tilDelta)}";
+                    }
+                    else
+                    {
+                        tilPanel.Visibility = Visibility.Collapsed;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static AccountLogEntry GetManualSetForDay(DateTime date, string kind)
+        {
+            try
+            {
+                var items = TimeTrackingService.Instance.GetAccountLogEntries(date, date, kind);
+                if (items == null) return null;
+                return items.Where(a => (a.Note ?? string.Empty).IndexOf("manual set", StringComparison.OrdinalIgnoreCase) >= 0)
+                            .OrderBy(a => a.Date)
+                            .LastOrDefault();
+            }
+            catch { return null; }
+        }
+
+        private static double GetManualOverrideSumForDay(DateTime date, string kind)
+        {
+            try
+            {
+                var items = TimeTrackingService.Instance.GetAccountLogEntries(date, date, kind);
+                if (items == null) return 0;
+                return items.Where(a => (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0)
+                            .Sum(a => a.Delta);
+            }
+            catch { return 0; }
+        }
+
+        private void ImportExcel_Click(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show("Import from Excel is not implemented yet.", "Import", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void ExportExcel_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Persist any pending edits so recalculation sees latest
+                SaveCurrentDayEdits();
+
+                // Recalculate across all known days using the same logic as the UI
+                var all = RecalculateAllDaysAndBalances();
+                if (all == null || all.Count == 0)
+                {
+                    MessageBox.Show("No data to export.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                var ordered = all.OrderBy(d => d.Date).ToList();
+
+                var dlg = new SaveFileDialog { Filter = "Excel Workbook (*.xlsx)|*.xlsx", FileName = "TimeTracking.xlsx" };
+                if (dlg.ShowDialog(this) != true) return;
+
+                using (var wb = new XLWorkbook())
+                {
+                    var ws = wb.Worksheets.Add("Days");
+                    // Header
+                    var headers = new List<string>
+                    {
+                        "Date","Weekday","Employment Position","Location","Physical Location","Day Type","Target Hours","Worked Hours","Delta","Delta Holiday","Cumulative TIL","Cumulative Holiday",
+                        "Manual Reset TIL","Manual Reset Holiday","Manual Reset Notes",
+                        "Start1","End1","Lunch1","Desc1",
+                        "Start2","End2","Lunch2","Desc2",
+                        "Start3","End3","Lunch3","Desc3",
+                        "Start4","End4","Lunch4","Desc4"
+                    };
+                    for (int i = 0; i < headers.Count; i++) ws.Cell(1, i + 1).Value = headers[i];
+                    ws.Row(1).Style.Font.Bold = true;
+                    ws.SheetView.FreezeRows(1);
+
+                    // cache manual reset log entries by date for the full exported range
+                    var from = ordered.First().Date.Date;
+                    var to = ordered.Last().Date.Date;
+                    var allLog = TimeTrackingService.Instance.GetAccountLogEntries(from, to, null);
+
+                    int row = 2;
+                    foreach (var d in ordered)
+                    {
+                        ws.Cell(row, 1).Value = d.Date; ws.Cell(row, 1).Style.DateFormat.Format = "yyyy-MM-dd";
+                        ws.Cell(row, 2).Value = d.Date.ToString("dddd");
+                        ws.Cell(row, 3).Value = d.PositionOverride ?? d.Template?.JobDescription ?? string.Empty;
+                        ws.Cell(row, 4).Value = d.LocationOverride ?? d.Template?.Location ?? string.Empty;
+                        ws.Cell(row, 5).Value = d.PhysicalLocationOverride ?? (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? string.Empty);
+                        ws.Cell(row, 6).Value = d.DayType.ToString();
+                        ws.Cell(row, 7).Value = d.TargetComputed; ws.Cell(row, 7).Style.NumberFormat.Format = "0.00";
+                        ws.Cell(row, 8).Value = d.Worked; ws.Cell(row, 8).Style.NumberFormat.Format = "0.00";
+                        double tilDelta = d.Worked - d.TargetComputed;
+                        ws.Cell(row, 9).Value = tilDelta; ws.Cell(row, 9).Style.NumberFormat.Format = "0.00";
+                        double deltaHoliday = d.DayType == DayType.Vacation ? -1.0 : 0.0;
+                        ws.Cell(row, 10).Value = deltaHoliday; ws.Cell(row, 10).Style.NumberFormat.Format = "0.00";
+                        ws.Cell(row, 11).Value = d.CumulativeTIL; ws.Cell(row, 11).Style.NumberFormat.Format = "0.00";
+                        ws.Cell(row, 12).Value = d.CumulativeHoliday; ws.Cell(row, 12).Style.NumberFormat.Format = "0.00";
+
+                        var dayLogs = allLog.Where(a => a.Date.Date == d.Date.Date && (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+                        double tilReset = dayLogs.Where(a => string.Equals(a.Kind, "TIL", StringComparison.OrdinalIgnoreCase)).Sum(a => a.Delta);
+                        double holReset = dayLogs.Where(a => string.Equals(a.Kind, "Holiday", StringComparison.OrdinalIgnoreCase)).Sum(a => a.Delta);
+                        string notes = string.Join("; ", dayLogs.Select(a => (a.Kind ?? "") + ": " + a.Delta.ToString("0.##") + (string.IsNullOrWhiteSpace(a.Note) ? "" : " (" + a.Note + ")")));
+                        ws.Cell(row, 13).Value = tilReset; ws.Cell(row, 13).Style.NumberFormat.Format = "0.00";
+                        ws.Cell(row, 14).Value = holReset; ws.Cell(row, 14).Style.NumberFormat.Format = "0.00";
+                        ws.Cell(row, 15).Value = notes;
+
+                        var shifts = (d.Shifts ?? new List<Shift>()).OrderBy(s => s.Start).ToList();
+                        for (int i = 0; i < Math.Min(4, shifts.Count); i++)
+                        {
+                            int c = 16 + i * 4;
+                            ws.Cell(row, c + 0).Value = shifts[i].Start.ToString(@"hh\:mm");
+                            ws.Cell(row, c + 1).Value = shifts[i].End.ToString(@"hh\:mm");
+                            ws.Cell(row, c + 2).Value = shifts[i].LunchBreak.ToString(@"hh\:mm");
+                            ws.Cell(row, c + 3).Value = shifts[i].Description ?? string.Empty;
+                        }
+
+                        if (d.DayType != DayType.WorkingDay)
+                        {
+                            var xlColor = DayTypeToXlColor(d.DayType); if (xlColor != null) ws.Row(row).Style.Fill.SetBackgroundColor(xlColor);
+                        }
+                        row++;
+                    }
+
+                    ws.Columns().AdjustToContents();
+
+                    // Manual Resets sheet for full range
+                    var logWs = wb.Worksheets.Add("ManualResets");
+                    logWs.Cell(1, 1).Value = "Date"; logWs.Cell(1, 2).Value = "Kind"; logWs.Cell(1, 3).Value = "Delta"; logWs.Cell(1, 4).Value = "Balance"; logWs.Cell(1, 5).Value = "Note"; logWs.Cell(1, 6).Value = "AffectedDate"; logWs.Row(1).Style.Font.Bold = true;
+                    int lr = 2; foreach (var a in TimeTrackingService.Instance.GetAccountLogEntries(from, to, null).Where(a => (a.Note ?? string.Empty).IndexOf("manual", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        logWs.Cell(lr, 1).Value = a.Date; logWs.Cell(lr, 1).Style.DateFormat.Format = "yyyy-MM-dd HH:mm";
+                        logWs.Cell(lr, 2).Value = a.Kind; logWs.Cell(lr, 3).Value = a.Delta; logWs.Cell(lr, 3).Style.NumberFormat.Format = "0.00";
+                        logWs.Cell(lr, 4).Value = a.Balance; logWs.Cell(lr, 4).Style.NumberFormat.Format = "0.00";
+                        logWs.Cell(lr, 5).Value = a.Note ?? string.Empty; logWs.Cell(lr, 6).Value = a.AffectedDate.HasValue ? a.AffectedDate.Value.ToString("yyyy-MM-dd") : string.Empty; lr++;
+                    }
+                    logWs.Columns().AdjustToContents();
+
+                    wb.SaveAs(dlg.FileName);
+                }
+                MessageBox.Show("Exported to Excel.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex) { MessageBox.Show("Failed to export: " + ex.Message, "Export", MessageBoxButton.OK, MessageBoxImage.Error); }
+        }
+
+        private List<DayViewModel> BuildAllDaysAcrossData()
+        {
+            var days = new List<DayViewModel>();
+            try
+            {
+                DateTime? min = null; DateTime? max = null;
+                try { var events = TimeTrackingService.Instance.GetEvents(); if (events != null && events.Count > 0) { var mn = events.Min(e => e.Timestamp.Date); var mx = events.Max(e => e.Timestamp.Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
+                try { var sh = TimeTrackingService.Instance.GetAllSavedShifts(); if (sh != null && sh.Count > 0) { var mn = sh.Min(s => s.Date.Date); var mx = sh.Max(s => s.Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
+                try { var ov = TimeTrackingService.Instance.GetOverrides(); if (ov != null && ov.Count > 0) { var mn = ov.Min(o => o.Date.Date); var mx = ov.Max(o => o.Date.Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
+                try { var tmps = TimeTrackingService.Instance.GetTemplates(); if (tmps != null && tmps.Count > 0) { var mn = tmps.Min(t => t.StartDate.Date); var mx = tmps.Max(t => (t.EndDate ?? DateTime.Today).Date); min = min.HasValue ? (mn < min ? mn : min) : mn; max = max.HasValue ? (mx > max ? mx : mx) : mx; } } catch { }
+                if (!min.HasValue || !max.HasValue)
+                {
+                    var f = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1); var l = f.AddMonths(1).AddDays(-1); var summaries0 = TimeTrackingService.Instance.GetDaySummaries(f, l); days = summaries0.Select(s => new DayViewModel(s)).ToList();
+                }
+                else { var summaries = TimeTrackingService.Instance.GetDaySummaries(min.Value, max.Value); days = summaries.Select(s => new DayViewModel(s)).ToList(); }
+
+                var ordered = days.OrderBy(d => d.Date).ToList();
+                foreach (var d in ordered)
+                {
+                    var ov = TimeTrackingService.Instance.GetOverrideForDate(d.Date);
+                    if (ov != null)
+                    {
+                        d.PositionOverride = ov.Position; d.LocationOverride = ov.Location; d.PhysicalLocationOverride = string.IsNullOrWhiteSpace(ov.PhysicalLocation) ? (string.IsNullOrWhiteSpace(ov.Location) ? d.Template?.Location : ov.Location) : ov.PhysicalLocation; d.TargetHours = ov.TargetHours; if (ov.DayType.HasValue) d.SetDayType(ov.DayType.Value);
+                    }
+                    else if (d.Template != null && !string.IsNullOrWhiteSpace(d.Template.Location)) d.PhysicalLocationOverride = d.Template.Location;
+                    var shs = TimeTrackingService.Instance.GetShiftsForDate(d.Date).ToList(); d.Shifts = shs.Any() ? shs.Select(s2 => new Shift { Date = s2.Date, Start = s2.Start, End = s2.End, Description = s2.Description, DayMode = s2.DayMode, ManualStartOverride = s2.ManualStartOverride, ManualEndOverride = s2.ManualEndOverride, LunchBreak = s2.LunchBreak }).ToList() : new List<Shift>();
+                }
+                days = ordered;
+            }
+            catch { }
+            return days;
+        }
+
+        private void DrawYearGridToGraphics(XGraphics g, List<DayViewModel> days, int year, ExportMapMode mode)
+        {
+            double margin = 30; double pageWidth = g.PageSize.Width; double pageHeight = g.PageSize.Height; double contentWidth = pageWidth - (margin * 2); double legendHeight = 80;
+            var headerFont = new XFont("Arial", 18, XFontStyle.Bold);
+            var sub = mode == ExportMapMode.PhysicalLocation ? "Physical location map - " : mode == ExportMapMode.OvertimeGradient ? "Overtime map - " : "Day type map - ";
+            g.DrawString(sub + year.ToString(), headerFont, XBrushes.Black, new XRect(margin, 10, contentWidth, 30), XStringFormats.TopLeft);
+            int cols = 3; int rows = 4; double gap = 8; double monthWidth = (contentWidth - (gap * (cols - 1))) / cols; double monthGridAvailableHeight = pageHeight - 80 - legendHeight - (gap * (rows - 1)); double monthHeight = monthGridAvailableHeight / rows;
+            for (int m = 1; m <= 12; m++)
+            {
+                int monthIndex = m - 1; int col = monthIndex % cols; int row = monthIndex / cols; double x = margin + col * (monthWidth + gap); double y = 50 + row * (monthHeight + gap);
+                DrawSingleMonth(g, days, year, m, new XRect(x, y, monthWidth, monthHeight), mode);
+            }
+            DrawLegend(g, margin, pageHeight - legendHeight + 12, mode, days, contentWidth, year);
+        }
+        private void DrawSingleMonth(XGraphics g, List<DayViewModel> days, int year, int month, XRect rect, ExportMapMode mode)
+        {
+            var monthName = CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(month);
+            var titleFont = new XFont("Arial", 12, XFontStyle.Bold);
+            g.DrawString(monthName + " " + year.ToString(), titleFont, XBrushes.Black, new XPoint(rect.X + 4, rect.Y + 14));
+            double top = rect.Y + 22;
+            double left = rect.X + 2;
+            double gridWidth = rect.Width - 4;
+            double gridHeight = rect.Height - 28;
+            int cols = 7; int rows = 6;
+            double cellW = gridWidth / cols; double cellH = gridHeight / rows;
+            var first = new DateTime(year, month, 1);
+            int leading = (int)first.DayOfWeek - 1; if (leading < 0) leading += 7;
+
+            for (int i = 0; i < rows * cols; i++)
+            {
+                int dayNum = i - leading + 1;
+                double cx = left + (i % cols) * cellW; double cy = top + (i / cols) * cellH;
+                var cellRect = new XRect(cx, cy, cellW - 1, cellH - 1);
+                if (dayNum >= 1 && dayNum <= DateTime.DaysInMonth(year, month))
+                {
+                    var d = days.FirstOrDefault(dd => dd.Date.Year == year && dd.Date.Month == month && dd.Date.Day == dayNum);
+                    XBrush brush = XBrushes.White;
+                    if (d != null)
+                    {
+                        if (mode == ExportMapMode.PhysicalLocation)
+                        {
+                            var key = !string.IsNullOrWhiteSpace(d.PhysicalLocationOverride) ? d.PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(d.LocationOverride) ? d.LocationOverride : d.Template?.Location ?? string.Empty);
+                            if (string.IsNullOrWhiteSpace(key)) brush = XBrushes.White;
+                            else
+                            {
+                                var hex = TimeTrackingService.Instance.GetOrCreateLocationColor(key);
+                                if (!string.IsNullOrWhiteSpace(hex))
+                                {
+                                    try { var sysc = (Color)ColorConverter.ConvertFromString(hex); brush = new XSolidBrush(XColor.FromArgb(sysc.A, sysc.R, sysc.G, sysc.B)); }
+                                    catch { brush = XBrushes.White; }
+                                }
+                                else brush = XBrushes.White;
+                            }
+                        }
+                        else if (mode == ExportMapMode.OvertimeGradient)
+                        {
+                            bool isSpecial = d.DayType == DayType.Weekend || d.DayType == DayType.PublicHoliday || d.DayType == DayType.Vacation;
+                            if (isSpecial && Math.Abs(d.Worked) < 0.0001)
+                            {
+                                brush = new XSolidBrush(XColor.FromArgb(0xFF, 0xF0, 0xF0, 0xF0));
+                            }
+                            else
+                            {
+                                double delta = d.Worked - d.TargetComputed;
+                                brush = GetOvertimeBrush(delta);
+                            }
+                        }
+                        else
+                        {
+                            if (DayTypePdfColors.TryGetValue(d.DayType, out var c)) brush = new XSolidBrush(c); else brush = XBrushes.White;
+                        }
+                    }
+                    g.DrawRectangle(brush, cellRect);
+                    var numFont = new XFont("Arial", 8, XFontStyle.Regular);
+                    g.DrawString(dayNum.ToString(), numFont, XBrushes.Black, new XPoint(cellRect.X + 4, cellRect.Y + 10));
+                }
+                else
+                {
+                    g.DrawRectangle(XBrushes.LightGray, cellRect);
+                }
+            }
+            g.DrawRectangle(XPens.Black, rect.X, rect.Y, rect.Width, rect.Height);
+        }
+
+        private XLColor? DayTypeToXlColor(DayType dt)
+        {
+            switch (dt)
+            {
+                case DayType.Weekend: return XLColor.FromHtml("#F0F0F0");
+                case DayType.PublicHoliday: return XLColor.FromHtml("#FFE5E5");
+                case DayType.Vacation: return XLColor.FromHtml("#DDEEFF");
+                case DayType.TimeInLieu: return XLColor.FromHtml("#FFF2CC");
+                case DayType.Other: return XLColor.FromHtml("#EFEFEF");
+                default: return null;
+            }
+        }
     }
 
     // View model for a day used by the TimeTrackingDialog. Provides values and formatting used by XAML bindings.
@@ -1866,6 +1957,13 @@ namespace Todo
             {
                 try
                 {
+                    // New rule: if weekend, public holiday or vacation AND 0 hours worked, show grey
+                    bool isSpecialDay = DayType == DayType.Weekend || DayType == DayType.PublicHoliday || DayType == DayType.Vacation;
+                    if (isSpecialDay && Math.Abs(Worked) < 0.0001)
+                    {
+                        return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F0F0F0"));
+                    }
+
                     if (TimeTrackingDialog.ColorByPhysicalLocation)
                     {
                         var key = !string.IsNullOrWhiteSpace(PhysicalLocationOverride) ? PhysicalLocationOverride : (!string.IsNullOrWhiteSpace(LocationOverride) ? LocationOverride : Template?.EmploymentLocation ?? string.Empty);
@@ -1879,9 +1977,9 @@ namespace Todo
                         // fallback: deterministic color by hash
                         int h = key.GetHashCode();
                         byte r = (byte)(80 + (Math.Abs(h) % 176));
-                        byte g = (byte)(80 + (Math.Abs(h / 7) % 176));
+                        byte gcol = (byte)(80 + (Math.Abs(h / 7) % 176));
                         byte b = (byte)(80 + (Math.Abs(h / 13) % 176));
-                        return new SolidColorBrush(Color.FromArgb(255, r, g, b));
+                        return new SolidColorBrush(Color.FromArgb(255, r, gcol, b));
                     }
                     // Color by day type
                     switch (DayType)
@@ -1892,7 +1990,7 @@ namespace Todo
                         case DayType.Vacation: return (Brush)new SolidColorBrush((Color)ColorConverter.ConvertFromString("#DDEEFF"));
                         case DayType.TimeInLieu: return (Brush)new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF2CC"));
                         case DayType.Other: return (Brush)new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EFEFEF"));
-                        default: return Brushes.White;
+                        default: return null;
                     }
                 }
                 catch { return Brushes.White; }

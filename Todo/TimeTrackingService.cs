@@ -613,6 +613,18 @@ namespace Todo
             return _locationColors.TryGetValue(location, out var hex) ? hex : null;
         }
 
+        // Returns an existing color for the location or generates, persists, and returns a deterministic color if none is set yet.
+        public string GetOrCreateLocationColor(string location)
+        {
+            if (string.IsNullOrWhiteSpace(location)) return null;
+            if (_locationColors.TryGetValue(location, out var hex) && !string.IsNullOrWhiteSpace(hex)) return hex;
+            // generate deterministic fallback color and persist it
+            var gen = GenerateColorHexFromKey(location);
+            _locationColors[location] = gen;
+            SaveLocationColors();
+            return gen;
+        }
+
         public void SetLocationColor(string location, string hex)
         {
             if (string.IsNullOrWhiteSpace(location)) return;
@@ -653,6 +665,18 @@ namespace Todo
             // try parse named colors? ignore; fallback
             return hex.ToUpperInvariant();
         }
+
+        private static string GenerateColorHexFromKey(string key)
+        {
+            unchecked
+            {
+                int h = key?.GetHashCode() ?? 0;
+                byte r = (byte)(80 + (Math.Abs(h) % 176));
+                byte g = (byte)(80 + (Math.Abs(h / 7) % 176));
+                byte b = (byte)(80 + (Math.Abs(h / 13) % 176));
+                return $"#{r:X2}{g:X2}{b:X2}";
+            }
+        }
     }
 
     // Converter to persist TimeSpan values in a robust format (we use "hh:mm"). Also accepts numeric minutes for backward compat.
@@ -679,7 +703,7 @@ namespace Todo
         public override void Write(Utf8JsonWriter writer, TimeSpan value, JsonSerializerOptions options)
         {
             // write as "hh:mm"
-            writer.WriteStringValue(value.ToString(@"hh\:mm"));
+            writer.WriteStringValue(value.ToString(@"hh\\:mm"));
         }
     }
 
