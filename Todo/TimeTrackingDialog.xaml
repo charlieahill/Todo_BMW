@@ -199,6 +199,13 @@
                     </StackPanel>
                 </StackPanel>
 
+                <!-- Manual recalc row with progress bar -->
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+                    <Button x:Name="ManualRecalcButton" Content="Manual Recalc" Click="ManualRecalc_Click" Width="120"/>
+                    <ProgressBar x:Name="RecalcProgressBar" Width="220" Height="16" Margin="12,0,0,0" Minimum="0" Maximum="100" Visibility="Collapsed"/>
+                    <TextBlock x:Name="RecalcProgressText" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </StackPanel>
+
                 <!-- Removed old buttons: View Log and Export year colour map (now in menu) -->
             </StackPanel>
 

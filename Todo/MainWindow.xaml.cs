@@ -16,68 +16,60 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
-using System.Windows.Shapes;
 using System.Windows.Threading;
-using System.Windows; // ensure MessageBox
+using System.Windows.Interop;
+using WinForms = System.Windows.Forms;
 
 namespace Todo
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
-        // All persisted user-visible files go under My Documents/CHillSW/TodoBMW
-        private static readonly string DataDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "CHillSW", "TodoBMW");
-        private static readonly string SaveFileName = System.IO.Path.Combine(DataDirectory, "tasks_by_date.json");
-        private static readonly string MetaFileName = System.IO.Path.Combine(DataDirectory, "meta.json");
+        // Storage paths
+        private static readonly string DataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "CHillSW", "TodoBMW");
+        private static readonly string SaveFileName = Path.Combine(DataDirectory, "tasks_by_date.json");
+        private static readonly string MetaFileName = Path.Combine(DataDirectory, "meta.json");
+        private static readonly string StartupLogFile = Path.Combine(DataDirectory, "startup_checks.log");
+        private static readonly string DebugLogFile = Path.Combine(DataDirectory, "tasks_debug_log.txt");
 
-        // Special key for repository bucket (date-independent)
         private const string RepositoryKey = "__repository__";
 
-        // All tasks keyed by date string (yyyy-MM-dd) or RepositoryKey
         private Dictionary<string, List<TaskModel>> AllTasks { get; set; } = new Dictionary<string, List<TaskModel>>();
-
         public ObservableCollection<TaskModel> TaskList { get; set; } = new ObservableCollection<TaskModel>();
 
         private DateTime _currentDate = DateTime.Today;
-
         private bool _isInitializing = false;
 
-        // Auto-backup support
+        // Auto-backup
         private DispatcherTimer _autoBackupTimer;
-        private static readonly string AutoBackupFolder = System.IO.Path.Combine(DataDirectory, "autobackups");
-        private const int AutoBackupKeep = 20; // keep 20 most recent autobackups
-        private readonly TimeSpan AutoBackupInterval = TimeSpan.FromHours(1); // run autobackup every hour
-        private static readonly string StartupLogFile = System.IO.Path.Combine(DataDirectory, "startup_checks.log");
-        private static readonly string DebugLogFile = System.IO.Path.Combine(DataDirectory, "tasks_debug_log.txt");
+        private static readonly string AutoBackupFolder = Path.Combine(DataDirectory, "autobackups");
+        private const int AutoBackupKeep = 20;
+        private readonly TimeSpan AutoBackupInterval = TimeSpan.FromHours(1);
 
-        private void AppendStartupLog(string message)
-        {
-            try
-            {
-                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n";
-                // Ensure data directory exists
-                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
-                System.IO.File.AppendAllText(StartupLogFile, line);
-                // Also append to the general debug log so startup checks are visible in the main log
-                try { System.IO.File.AppendAllText(DebugLogFile, line); } catch { }
-            }
-            catch { /* don't break startup for logging failures */ }
-        }
+        // Dock/snap tracking
+        private double _initialDockedHeight = 0; // working-area height at last dock
+        private bool _isDockingOperation = false; // suppress LocationChanged while we move programmatically
+        private bool _hasShrunkAfterMove = false; // ensure half-height is applied only once after docking
+        private DispatcherTimer _shrinkAfterMoveTimer; // debounce applying half-height until after move settles
+        private double? _targetShrinkHeight = null; // value to enforce briefly against OS snap override
+        private int _shrinkEnforcementAttempts = 0;
+
+        // Track move/size session to detect start and end of manual move
+        private bool _isMoveOrSize = false;
+        private bool _wasRightFullHeightAtMoveStart = false;
+
+        // misc flags
+        private bool _suppressTextChanged = false;
+        private bool _placeholderJustFocused = false;
 
         public MainWindow()
         {
             InitializeComponent();
-
             DataContext = this;
 
             _isInitializing = true;
 
-            // Ensure data directory exists before any IO
-            try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
+            try { Directory.CreateDirectory(DataDirectory); } catch { }
 
-            // Clear existing logs on application start so each run begins with fresh logs
             try
             {
                 try { File.WriteAllText(StartupLogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Startup log cleared\n"); } catch { }
@@ -86,12 +78,19 @@ namespace Todo
             catch { }
 
             LoadTasks();
-
             SetCurrentDate(_currentDate);
 
             // If application was last opened on a previous day, prompt to carry over unfinished tasks
             // Moved carryover handling to Loaded event so dialog is shown reliably after window is displayed
             this.Loaded += MainWindow_Loaded;
+
+            // Track manual moves (now no-op; move end handled via WM_EXITSIZEMOVE)
+            this.LocationChanged += MainWindow_LocationChanged;
+            // this.SizeChanged += MainWindow_SizeChanged; // removed: we only shrink at end of move
+
+            // Removed debounce timer; shrink occurs at end of move via WM_EXITSIZEMOVE
+            // _shrinkAfterMoveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            // _shrinkAfterMoveTimer.Tick += (s, e) => { try { _shrinkAfterMoveTimer.Stop(); PerformHalfHeightShrinkIfNeeded(); } catch { } };
 
             lbTasksList.ItemsSource = TaskList;
             lbTasksList.MouseDoubleClick += LbTasksList_MouseDoubleClick;
@@ -102,9 +101,7 @@ namespace Todo
             try
             {
                 _autoBackupTimer = new DispatcherTimer { Interval = AutoBackupInterval };
-                _autoBackupTimer.Tick += (s, e) => {
-                    try { AutoBackupNow(); } catch { }
-                };
+                _autoBackupTimer.Tick += (s, e) => { try { AutoBackupNow(); } catch { } };
                 _autoBackupTimer.Start();
             }
             catch { }
@@ -168,6 +165,9 @@ namespace Todo
         {
             try
             {
+                // Dock to right edge full height by default on first show
+                DockRightFullHeight();
+
                 // Ensure carryover dialog is invoked after the main window is shown so it appears reliably
                 Dispatcher.BeginInvoke(new Action(() => HandleCarryOverIfNewDay()), DispatcherPriority.Background);
             }
@@ -179,9 +179,166 @@ namespace Todo
             }
         }
 
-        private class MetaInfo
+        // DockRightFullHeight modifies _initialDockedHeight, which is used to decide half-height on manual move.
+        private void MainWindow_LocationChanged(object sender, EventArgs e)
         {
-            public DateTime? LastOpened { get; set; }
+            try
+            {
+                // no-op: shrink handled in WM_EXITSIZEMOVE
+            }
+            catch { }
+        }
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            try
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                var source = HwndSource.FromHwnd(hwnd);
+                if (source != null)
+                {
+                    source.AddHook(WndProc);
+                }
+            }
+            catch { }
+        }
+
+        private const int WM_ENTERSIZEMOVE = 0x0231;
+        private const int WM_EXITSIZEMOVE = 0x0232;
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            try
+            {
+                switch (msg)
+                {
+                    case WM_ENTERSIZEMOVE:
+                        _isMoveOrSize = true;
+                        _wasRightFullHeightAtMoveStart = IsAtRightFullHeight();
+                        // Ensure the baseline height uses current working area when at full height
+                        if (_wasRightFullHeightAtMoveStart)
+                        {
+                            _initialDockedHeight = GetWorkingAreaDips().height;
+                        }
+                        break;
+                    case WM_EXITSIZEMOVE:
+                        _isMoveOrSize = false;
+                        if (_wasRightFullHeightAtMoveStart)
+                        {
+                            ApplyHalfHeightFromWorkingArea();
+                            _hasShrunkAfterMove = true;
+                        }
+                        _wasRightFullHeightAtMoveStart = false;
+                        break;
+                }
+            }
+            catch { }
+            return IntPtr.Zero;
+        }
+
+        private (double left, double top, double width, double height) GetWorkingAreaDips()
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var screen = WinForms.Screen.FromHandle(hwnd);
+            var wa = screen.WorkingArea; // pixels
+            var dpi = VisualTreeHelper.GetDpi(this);
+            return (wa.Left / dpi.DpiScaleX,
+                    wa.Top / dpi.DpiScaleY,
+                    wa.Width / dpi.DpiScaleX,
+                    wa.Height / dpi.DpiScaleY);
+        }
+
+        private bool IsAtRightFullHeight()
+        {
+            if (WindowState != WindowState.Normal) return false;
+            var wa = GetWorkingAreaDips();
+            double epsilon = 2.0;
+            double right = Left + Width;
+            double waRight = wa.left + wa.width;
+            return Math.Abs(Top - wa.top) <= epsilon
+                   && Math.Abs(Height - wa.height) <= epsilon
+                   && Math.Abs(right - waRight) <= epsilon;
+        }
+
+        private void ApplyHalfHeightFromWorkingArea()
+        {
+            try
+            {
+                var wa = GetWorkingAreaDips();
+                var newHeight = wa.height / 2.0;
+                if (MinHeight > 0 && newHeight < MinHeight) newHeight = MinHeight;
+                _isDockingOperation = true;
+                Height = newHeight;
+            }
+            catch { }
+            finally
+            {
+                Dispatcher.BeginInvoke(new Action(() => _isDockingOperation = false), DispatcherPriority.Background);
+            }
+        }
+
+        private void DockRightFullHeightButton_Click(object sender, RoutedEventArgs e)
+        {
+            DockRightFullHeight();
+        }
+
+        private void DockRightFullHeight()
+        {
+            try
+            {
+                _isDockingOperation = true;
+
+                // Restore from Maximized to allow manual sizing
+                if (this.WindowState != WindowState.Normal)
+                    this.WindowState = WindowState.Normal;
+
+                var hwnd = new WindowInteropHelper(this).Handle;
+                var screen = WinForms.Screen.FromHandle(hwnd);
+                var wa = screen.WorkingArea; // pixels
+
+                // Get DPI for this window/monitor to convert to WPF DIPs
+                var dpi = VisualTreeHelper.GetDpi(this);
+                double dipLeft = wa.Left / dpi.DpiScaleX;
+                double dipTop = wa.Top / dpi.DpiScaleY;
+                double dipWidth = wa.Width / dpi.DpiScaleX;
+                double dipHeight = wa.Height / dpi.DpiScaleY;
+
+                // Desired width: keep current width but clamp to work area
+                double width = double.IsNaN(this.Width) || this.Width <= 0 ? (this.ActualWidth > 0 ? this.ActualWidth : dipWidth) : this.Width;
+                if (width > dipWidth) width = dipWidth;
+
+                this.Top = dipTop;
+                this.Height = dipHeight;
+                this.Left = dipLeft + (dipWidth - width);
+                this.Width = width;
+
+                _initialDockedHeight = dipHeight;
+                _hasShrunkAfterMove = false; // allow the next manual move to trigger half-height
+
+                // stop any pending shrink requests scheduled prior to docking again
+                _shrinkAfterMoveTimer?.Stop();
+            }
+            catch { }
+            finally
+            {
+                // Clear docking flag shortly after layout updates to ignore LocationChanged during programmatic move
+                Dispatcher.BeginInvoke(new Action(() => _isDockingOperation = false), DispatcherPriority.Background);
+            }
+        }
+
+        private void AppendStartupLog(string message)
+        {
+            try
+            {
+                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n";
+                // Ensure data directory exists
+                try { Directory.CreateDirectory(DataDirectory); } catch { }
+                File.AppendAllText(StartupLogFile, line);
+                // Also append to the general debug log so startup checks are visible in the main log
+                try { File.AppendAllText(DebugLogFile, line); } catch { }
+            }
+            catch { /* don't break startup for logging failures */ }
         }
 
         private void HandleCarryOverIfNewDay()
@@ -310,18 +467,13 @@ namespace Todo
 
         private void Current_Exit(object sender, ExitEventArgs e)
         {
-            // Force all TaskTextBox controls to lose focus and update their bindings
             CommitAllTaskEdits();
-            // Save tasks; SaveTasks will decide whether to persist current-date TaskList or just AllTasks
             SaveTasks();
-
-            // record close event
             try { TimeTrackingService.Instance.RecordClose(); } catch { }
         }
 
         private void CommitAllTaskEdits()
         {
-            // Find all ListViewItems in lbTasksList
             foreach (var item in lbTasksList.Items)
             {
                 var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(item) as ListViewItem;
@@ -330,10 +482,9 @@ namespace Todo
                     var textBox = FindVisualChild<TextBox>(listViewItem);
                     if (textBox != null && textBox.IsFocused)
                     {
-                        // Move focus away to commit binding
                         textBox.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
-                      }
-                 }
+                    }
+                }
             }
         }
 
@@ -347,12 +498,8 @@ namespace Todo
                     var items = JsonSerializer.Deserialize<Dictionary<string, List<TaskModel>>>(json);
                     if (items != null)
                     {
-                        LogLoadedTasks(items); // Log loaded tasks for debugging
-                        // Remove placeholders from loaded data
-                        foreach (var key in items.Keys.ToList())
-                        {
-                            items[key] = items[key].Where(t => t != null && !t.IsPlaceholder).ToList();
-                        }
+                        LogLoadedTasks(items);
+                        foreach (var key in items.Keys.ToList()) items[key] = items[key].Where(t => t != null && !t.IsPlaceholder).ToList();
                         AllTasks = items;
                     }
                 }
@@ -361,68 +508,42 @@ namespace Todo
             {
                 MessageBox.Show($"Failed to load tasks: {ex.Message}", "Error");
             }
-
-            // Update totals after loading tasks
             UpdateTotals();
         }
 
         private void SaveTasks()
         {
-            if (_isInitializing) return; // don't save during startup
-
-            LogAllTasks(); // Debug log before saving
+            if (_isInitializing) return;
+            LogAllTasks();
             try
             {
-                // Only persist the current TaskList into AllTasks when we're in Today view.
-                // When in filtered views (People/Meetings/All) TaskList contains a subset of items across dates
-                // and we must not overwrite the stored tasks for any date with that subset.
-                if (_mode == ViewMode.Today)
-                {
-                    SaveCurrentDateTasks(); // Ensure current day's tasks are saved before serializing
-                }
+                if (_mode == ViewMode.Today) SaveCurrentDateTasks();
 
-                // ensure we don't save placeholder items
                 var sanitized = new Dictionary<string, List<TaskModel>>();
-                foreach (var kv in AllTasks)
-                {
-                    sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
-                }
+                foreach (var kv in AllTasks) sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
 
-                // Ensure data directory exists
-                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
-
+                try { Directory.CreateDirectory(DataDirectory); } catch { }
                 var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SaveFileName, json);
-
-                // Update last saved display
                 try { UpdateLastSavedText(DateTime.Now); } catch { }
-                // Also update totals in case saving removed/added items
                 try { UpdateTotals(); } catch { }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to save tasks: {ex.Message}", "Error");
-            }
+            catch (Exception ex) { MessageBox.Show($"Failed to save tasks: {ex.Message}", "Error"); }
         }
 
         private void LogLoadedTasks(Dictionary<string, List<TaskModel>> items)
         {
             try
             {
-                // Ensure data directory exists
-                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
-                var logPath = DebugLogFile;
+                try { Directory.CreateDirectory(DataDirectory); } catch { }
                 var sb = new StringBuilder();
                 sb.AppendLine($"[{DateTime.Now}] Loaded AllTasks:");
                 foreach (var kv in items)
                 {
                     sb.AppendLine($"Date: {kv.Key}");
-                    foreach (var t in kv.Value)
-                    {
-                        sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
-                    }
+                    foreach (var t in kv.Value) sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
                 }
-                File.AppendAllText(logPath, sb.ToString());
+                File.AppendAllText(DebugLogFile, sb.ToString());
             }
             catch { }
         }
@@ -431,20 +552,15 @@ namespace Todo
         {
             try
             {
-                // Ensure data directory exists
-                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
-                var logPath = DebugLogFile;
+                try { Directory.CreateDirectory(DataDirectory); } catch { }
                 var sb = new StringBuilder();
                 sb.AppendLine($"[{DateTime.Now}] Saving AllTasks:");
                 foreach (var kv in AllTasks)
                 {
                     sb.AppendLine($"Date: {kv.Key}");
-                    foreach (var t in kv.Value)
-                    {
-                        sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
-                    }
+                    foreach (var t in kv.Value) sb.AppendLine($"  - {t.TaskName} (Complete: {t.IsComplete}, Placeholder: {t.IsPlaceholder})");
                 }
-                File.AppendAllText(logPath, sb.ToString());
+                File.AppendAllText(DebugLogFile, sb.ToString());
             }
             catch { }
         }
@@ -457,15 +573,9 @@ namespace Todo
             CurrentDayButton.Content = FormatDate(_currentDate);
             LoadTasksForDate(_currentDate);
             bool isToday = _currentDate == DateTime.Today;
-            foreach (var task in TaskList)
-            {
-                task.IsReadOnly = !isToday;
-            }
+            foreach (var task in TaskList) task.IsReadOnly = !isToday;
             UpdateTitle();
             UpdateJumpTodayIcon();
-            // SaveCurrentDateTasks(); // Removed to prevent wiping out tasks on startup
-
-            // Apply or clear Today filter based on current mode
             ApplyTodaySearchFilter();
         }
 
@@ -475,16 +585,8 @@ namespace Todo
             {
                 if (JumpTodayDot != null && JumpTodayCheck != null)
                 {
-                    if (_currentDate == DateTime.Today)
-                    {
-                        JumpTodayDot.Visibility = Visibility.Collapsed;
-                        JumpTodayCheck.Visibility = Visibility.Visible;
-                    }
-                    else
-                    {
-                        JumpTodayDot.Visibility = Visibility.Visible;
-                        JumpTodayCheck.Visibility = Visibility.Collapsed;
-                    }
+                    if (_currentDate == DateTime.Today) { JumpTodayDot.Visibility = Visibility.Collapsed; JumpTodayCheck.Visibility = Visibility.Visible; }
+                    else { JumpTodayDot.Visibility = Visibility.Visible; JumpTodayCheck.Visibility = Visibility.Collapsed; }
                 }
             }
             catch { }
@@ -498,337 +600,39 @@ namespace Todo
             {
                 foreach (var t in AllTasks[key])
                 {
-                    // Deep copy all properties, including id and future scheduling
-                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
-                    model.IsReadOnly = dt != DateTime.Today;
-                    model.InRepository = false;
-                    // carry over preferred index if present in stored item
-                    model.PreferredTodayIndex = t.PreferredTodayIndex;
+                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
+                    {
+                        IsReadOnly = dt != DateTime.Today,
+                        InRepository = false,
+                        PreferredTodayIndex = t.PreferredTodayIndex
+                    };
                     TaskList.Add(model);
                 }
             }
-            if (dt == DateTime.Today)
-            {
-                EnsureHasPlaceholder();
-            }
-
-            // Update totals whenever the view changes
+            if (dt == DateTime.Today) EnsureHasPlaceholder();
             UpdateTotals();
-
-            // Refresh Today filter after list reloaded
             ApplyTodaySearchFilter();
         }
 
         private void EnsureHasPlaceholder()
         {
-            if (TaskList.Count == 0 || !TaskList.Last().IsPlaceholder)
-            {
-                TaskList.Add(new TaskModel(string.Empty, false, true));
-            }
-
-            // ensure only last is placeholder
-            for (int i = 0; i < TaskList.Count - 1; i++)
-                TaskList[i].IsPlaceholder = false;
-        }
-
-        private void SetupSampleTasks()
-        {
-            // not used any more
-        }
-
-        private bool _suppressTextChanged = false;
-        private bool _placeholderJustFocused = false;
-
-        // In TaskTextBox_GotFocus, prevent focus for non-today
-        private void TaskTextBox_GotFocus(object sender, RoutedEventArgs e)
-        {
-            if (_currentDate != DateTime.Today && sender is TextBox tb)
-            {
-                tb.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
-                return;
-            }
-            if (sender is TextBox tb2 && tb2.DataContext is TaskModel tm)
-            {
-                if (tm.IsPlaceholder)
-                {
-                    _placeholderJustFocused = true;
-                }
-            }
-        }
-
-        private void TaskTextBlock_MouseDown(object sender, MouseButtonEventArgs e)
-        {
-            // When the preview TextBlock is clicked, focus the underlying TextBox for editing
-            try
-            {
-                if (sender is TextBlock tb && tb.DataContext is TaskModel tm)
-                {
-                    var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(tm) as ListViewItem;
-                    if (listViewItem != null)
-                    {
-                        var textBox = FindVisualChild<TextBox>(listViewItem);
-                        if (textBox != null)
-                        {
-                            textBox.Focus();
-                            textBox.CaretIndex = textBox.Text?.Length ?? 0;
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private void TaskTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
-        {
-            if (_currentDate != DateTime.Today)
-            {
-                e.Handled = true;
-                return;
-            }
-            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
-            {
-                if (tm.IsPlaceholder)
-                {
-                    _suppressTextChanged = true;
-                    tm.IsPlaceholder = false;
-                    tm.TaskName = "";
-                    tb.Text = "";
-                    _suppressTextChanged = false;
-                }
-            }
-        }
-
-        // Handle paste via keyboard or context menu by clearing placeholder before the paste occurs
-        private void TaskTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
-        {
-            try
-            {
-                if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder)
-                {
-                    bool isPasteKey = (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V) || (Keyboard.Modifiers == ModifierKeys.Shift && e.Key == Key.Insert);
-                    if (isPasteKey)
-                    {
-                        _suppressTextChanged = true;
-                        tm.IsPlaceholder = false;
-                        tm.TaskName = string.Empty;
-                        tb.Text = string.Empty;
-                        _suppressTextChanged = false;
-                        // allow paste to proceed
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private void TaskTextBox_Loaded(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (sender is TextBox tb)
-                {
-                    DataObject.AddPastingHandler(tb, new DataObjectPastingEventHandler(TaskTextBox_OnPasting));
-                }
-            }
-            catch { }
-        }
-
-        private void TaskTextBox_OnPasting(object sender, DataObjectPastingEventArgs e)
-        {
-            try
-            {
-                if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder)
-                {
-                    _suppressTextChanged = true;
-                    tm.IsPlaceholder = false;
-                    tm.TaskName = string.Empty;
-                    tb.Text = string.Empty;
-                    _suppressTextChanged = false;
-                }
-            }
-            catch { }
-        }
-
-        private void TaskTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_suppressTextChanged) return;
-            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
-            {
-                if (_currentDate != DateTime.Today)
-                {
-                    tb.Text = tm.TaskName; // revert any change
-                    return;
-                }
-                // Always add a new placeholder as soon as the last line's text changes from empty to non-empty
-                if (!tm.IsPlaceholder && TaskList.Last() == tm && !string.IsNullOrWhiteSpace(tb.Text))
-                {
-                    _suppressTextChanged = true;
-                    tm.TaskName = tb.Text;
-                    EnsureHasPlaceholder();
-                    _suppressTextChanged = false;
-                }
-                // Remove empty non-placeholder tasks (except the last)
-                else if (!tm.IsPlaceholder && string.IsNullOrWhiteSpace(tb.Text) && TaskList.IndexOf(tm) != TaskList.Count - 1)
-                {
-                    TaskList.Remove(tm);
-                }
-
-                // update current date storage in memory only (don't persist to disk here)
-                // Only update AllTasks when we're actually in the Today view. When in filtered modes
-                // (People/Meetings/All) TaskList contains a cross-date subset and must not be written
-                // back into a single date bucket which would clobber stored tasks for that date.
-                if (_mode == ViewMode.Today)
-                {
-                    var key = DateKey(_currentDate);
-                    AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
-                        .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
-                        {
-                            PreferredTodayIndex = t.PreferredTodayIndex
-                        })
-                        .ToList();
-                }
-            }
-            _placeholderJustFocused = false;
-            UpdateTitle();
-            UpdateTotals();
-
-            // Do not reapply the Today search filter on every keystroke while editing tasks,
-            // as refreshing the ListView can steal focus. The filter will still update when
-            // the Today search text changes or when the date/mode changes.
-            // ApplyTodaySearchFilter();
-        }
-
-        private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
-        {
-            if (_currentDate != DateTime.Today)
-            {
-                e.Handled = true;
-                return;
-            }
-
-            // If Enter pressed, move focus to the next task line (create placeholder if needed)
-            if (e.Key == Key.Enter && sender is TextBox tb && tb.DataContext is TaskModel tm)
-            {
-                // If we're on the last real item and it has text, ensure a placeholder exists before moving
-                if (TaskList.Last() == tm && !tm.IsPlaceholder && !string.IsNullOrWhiteSpace(tb.Text))
-                {
-                    EnsureHasPlaceholder();
-                }
-
-                var idx = TaskList.IndexOf(tm);
-                if (idx >= 0)
-                {
-                    var nextIdx = Math.Min(idx + 1, TaskList.Count - 1);
-                    var next = TaskList[nextIdx];
-                    var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(next) as ListViewItem;
-                    if (listViewItem != null)
-                    {
-                        var nextTextBox = FindVisualChild<TextBox>(listViewItem);
-                        if (nextTextBox != null)
-                        {
-                            nextTextBox.Focus();
-                            nextTextBox.CaretIndex = nextTextBox.Text?.Length ?? 0;
-                        }
-                        else
-                        {
-                            // Fallback: move focus programmatically
-                            Keyboard.Focus(listViewItem);
-                        }
-                    }
-                }
-
-                e.Handled = true;
-            }
-
-            // Removed immediate SaveTasks();
-        }
-
-        private void TaskTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            if (_currentDate != DateTime.Today)
-                return;
-            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
-            {
-                if (string.IsNullOrWhiteSpace(tm.TaskName))
-                {
-                    if (!tm.IsPlaceholder)
-                    {
-                        tm.TaskName = string.Empty;
-                        tm.IsPlaceholder = true;
-                    }
-                }
-            }
-            // Reset horizontal scroll so the start of the line is visible when losing focus
-            try
-            {
-                if (sender is TextBox tb2)
-                {
-                    var sv = FindVisualChild<ScrollViewer>(tb2);
-                    if (sv != null)
-                    {
-                        sv.ScrollToHorizontalOffset(0);
-                      }
-                  }
-            }
-            catch { }
-
-            // Save after lost focus for today (persist changes)
-            SaveTasks();
-        }
-
-        // Prevent checking/unchecking for non-today
-        private void CheckBox_Click(object sender, RoutedEventArgs e)
-        {
-            // If we're in Today view, follow the original behavior and persist via SaveTasks
-            if (_mode == ViewMode.Today)
-            {
-                // Save after completion state changes for today
-                SaveTasks();
-                return;
-            }
-
-            // For filtered views (People/Meetings/All) the TaskList contains a subset of tasks across dates.
-            // Update the corresponding task(s) in AllTasks by Id so we don't overwrite other items.
-            if (sender is CheckBox cb && cb.DataContext is TaskModel tm)
-            {
-                // Apply the IsComplete value to all matching tasks in storage
-                foreach (var k in AllTasks.Keys.ToList())
-                {
-                    var list = AllTasks[k];
-                    foreach (var stored in list.Where(x => x.Id == tm.Id))
-                    {
-                        stored.IsComplete = tm.IsComplete;
-                    }
-                }
-
-                // Persist the updated AllTasks
-                SaveTasks();
-            }
+            if (TaskList.Count == 0 || !TaskList.Last().IsPlaceholder) TaskList.Add(new TaskModel(string.Empty, false, true));
+            for (int i = 0; i < TaskList.Count - 1; i++) TaskList[i].IsPlaceholder = false;
         }
 
         private string GetOrdinalSuffix(int day)
         {
-            if (day % 100 >= 11 && day % 100 <= 13)
-                return "th";
-            switch (day % 10)
-            {
-                case 1: return "st";
-                case 2: return "nd";
-                case 3: return "rd";
-                default: return "th";
-            }
+            if (day % 100 >= 11 && day % 100 <= 13) return "th";
+            switch (day % 10) { case 1: return "st"; case 2: return "nd"; case 3: return "rd"; default: return "th"; }
         }
-
         private string FormatDate(DateTime dt)
         {
-            int day = dt.Day;
-            string suffix = GetOrdinalSuffix(day);
+            int day = dt.Day; string suffix = GetOrdinalSuffix(day);
             return $"{dt:dddd}, {day}{suffix} {dt:MMMM}, {dt:yyyy}";
         }
-
         private string FormatDateShort(DateTime dt)
         {
-            int day = dt.Day;
-            string suffix = GetOrdinalSuffix(day);
+            int day = dt.Day; string suffix = GetOrdinalSuffix(day);
             return $"{day}{suffix} {dt:MMMM} {dt:yyyy}";
         }
 
@@ -837,102 +641,39 @@ namespace Todo
             switch (_mode)
             {
                 case ViewMode.Today:
-                    if (_currentDate == DateTime.Today)
-                    {
-                        this.Title = $"Todo | Today - {FormatDateShort(_currentDate)}";
-                    }
-                    else
-                    {
-                        this.Title = $"Todo | {FormatDateShort(_currentDate)}";
-                    }
-                    break;
+                    Title = _currentDate == DateTime.Today ? $"Todo | Today - {FormatDateShort(_currentDate)}" : $"Todo | {FormatDateShort(_currentDate)}"; break;
                 case ViewMode.Repository:
-                    this.Title = "Todo | Repository";
-                    break;
+                    Title = "Todo | Repository"; break;
                 case ViewMode.People:
-                    string person = null;
-                    if (PeopleFilterComboBox != null && PeopleFilterComboBox.SelectedItem is string p)
-                        person = p;
-                    if (string.IsNullOrEmpty(person))
-                        this.Title = "Todo | Tasks with Other People";
-                    else
-                        this.Title = $"Todo | Tasks with {person}";
-                    break;
+                    string person = PeopleFilterComboBox?.SelectedItem as string;
+                    Title = string.IsNullOrEmpty(person) ? "Todo | Tasks with Other People" : $"Todo | Tasks with {person}"; break;
                 case ViewMode.Meetings:
-                    string meeting = null;
-                    if (MeetingsFilterComboBox != null && MeetingsFilterComboBox.SelectedItem is string m)
-                        meeting = m;
-                    if (string.IsNullOrEmpty(meeting))
-                        this.Title = "Todo | All Meetings";
-                    else
-                        this.Title = $"Todo | Meeting {meeting}";
-                    break;
+                    string meeting = MeetingsFilterComboBox?.SelectedItem as string;
+                    Title = string.IsNullOrEmpty(meeting) ? "Todo | All Meetings" : $"Todo | Meeting {meeting}"; break;
                 case ViewMode.All:
-                    string term = null;
-                    if (SearchTextBox != null)
-                        term = SearchTextBox.Text;
-                    if (string.IsNullOrWhiteSpace(term))
-                        this.Title = "Todo | All Tasks";
-                    else
-                        this.Title = $"Todo | Tasks containing {term}";
-                    break;
+                    string term = SearchTextBox?.Text;
+                    Title = string.IsNullOrWhiteSpace(term) ? "Todo | All Tasks" : $"Todo | Tasks containing {term}"; break;
                 default:
-                    this.Title = "Todo";
-                    break;
+                    Title = "Todo"; break;
             }
         }
 
-        // Navigation handlers
-        private void PreviousDayButton_Click(object sender, RoutedEventArgs e)
-        {
-            SetCurrentDate(_currentDate.AddDays(-1));
-        }
-
-        private void NextDayButton_Click(object sender, RoutedEventArgs e)
-        {
-            SetCurrentDate(_currentDate.AddDays(1));
-        }
-
+        // Navigation
+        private void PreviousDayButton_Click(object sender, RoutedEventArgs e) => SetCurrentDate(_currentDate.AddDays(-1));
+        private void NextDayButton_Click(object sender, RoutedEventArgs e) => SetCurrentDate(_currentDate.AddDays(1));
         private void CalendarButton_Click(object sender, RoutedEventArgs e)
         {
-            // Workaround: set focus to button before opening popup
             CalendarButton.Focus();
             CalendarPopup.IsOpen = true;
             CalendarControl.SelectedDate = _currentDate;
-            Dispatcher.BeginInvoke(new Action(() => CalendarControl.Focus()), System.Windows.Threading.DispatcherPriority.Input);
+            Dispatcher.BeginInvoke(new Action(() => CalendarControl.Focus()), DispatcherPriority.Input);
         }
-
         private void JumpToTodayButton_Click(object sender, RoutedEventArgs e)
         {
-            // Close the calendar popup (if open) and jump to today's date
-            try
-            {
-                if (CalendarPopup != null)
-                {
-                    CalendarPopup.IsOpen = false;
-                }
-            }
-            catch { }
-
-            SetCurrentDate(DateTime.Today);
-
-            try
-            {
-                if (CalendarControl != null)
-                    CalendarControl.SelectedDate = DateTime.Today;
-            }
-            catch { }
-        }
-
-        private void TomorrowButton_Click(object sender, RoutedEventArgs e)
-        {
-            var tomorrow = DateTime.Today.AddDays(1);
-            // Close calendar popup if open
             try { if (CalendarPopup != null) CalendarPopup.IsOpen = false; } catch { }
-            SetCurrentDate(tomorrow);
-            try { if (CalendarControl != null) CalendarControl.SelectedDate = tomorrow; } catch { }
+            SetCurrentDate(DateTime.Today);
+            try { if (CalendarControl != null) CalendarControl.SelectedDate = DateTime.Today; } catch { }
         }
-
         private void CalendarControl_SelectedDatesChanged(object sender, SelectionChangedEventArgs e)
         {
             if (CalendarControl.SelectedDate.HasValue)
@@ -946,180 +687,84 @@ namespace Todo
         private ViewMode _mode = ViewMode.Today;
         private string _activeFilter = null;
 
-        private void ExitAllMode()
-        {
-            DateControlsGrid.Visibility = Visibility.Visible;
-            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-            _mode = ViewMode.Today;
-            this.Tag = "Today";
-            // hide people/meetings filter containers when exiting special modes
-            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
-            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
-            // show today search container
-            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Visible;
-            SetCurrentDate(_currentDate);
-        }
-
         private void TodayButton_Click(object sender, RoutedEventArgs e)
         {
-            // Exit any special filter mode and return to today's view
-            // restore date controls
             DateControlsGrid.Visibility = Visibility.Visible;
-            // hide people/meetings filter comboboxes and containers
-            if (PeopleFilterComboBox != null) PeopleFilterComboBox.Visibility = Visibility.Collapsed;
-            if (MeetingsFilterComboBox != null) MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
-            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
-            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
-            // hide search UI
-            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-
-            _mode = ViewMode.Today;
-            this.Tag = "Today";
-            _activeFilter = null;
-            FilterPopup.IsOpen = false;
-            CalendarPopup.IsOpen = false;
-            // show today search
-            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Visible;
-            // Clear Today search when returning to Today mode
+            PeopleFilterComboBox.Visibility = Visibility.Collapsed; MeetingsFilterComboBox.Visibility = Visibility.Collapsed;
+            PeopleFilterContainer.Visibility = Visibility.Collapsed; MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+            SearchTextBox.Visibility = Visibility.Collapsed; SearchBoxBorder.Visibility = Visibility.Collapsed;
+            _mode = ViewMode.Today; this.Tag = "Today"; _activeFilter = null; FilterPopup.IsOpen = false; CalendarPopup.IsOpen = false;
+            TodaySearchContainer.Visibility = Visibility.Visible;
             ClearTodaySearchFilter();
             SetCurrentDate(DateTime.Today);
             ApplyTodaySearchFilter();
         }
-
         private void RepositoryButton_Click(object sender, RoutedEventArgs e)
         {
-            _mode = ViewMode.Repository;
-            this.Tag = "Repository";
-            // hide date controls and filters/search
+            _mode = ViewMode.Repository; this.Tag = "Repository";
             DateControlsGrid.Visibility = Visibility.Collapsed;
-            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
-            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
-            if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
-
+            PeopleFilterContainer.Visibility = Visibility.Collapsed; MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+            SearchTextBox.Visibility = Visibility.Collapsed; SearchBoxBorder.Visibility = Visibility.Collapsed;
+            TodaySearchContainer.Visibility = Visibility.Collapsed;
             ApplyRepositoryFilter();
             UpdateTitle();
         }
-
         private void PeopleButton_Click(object sender, RoutedEventArgs e)
         {
-            _mode = ViewMode.People;
-            this.Tag = "People";
-            // hide date controls and show people combobox container
+            _mode = ViewMode.People; this.Tag = "People";
             DateControlsGrid.Visibility = Visibility.Collapsed;
-            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Visible;
-            // ensure inner controls are visible (child ComboBox may have been collapsed earlier)
-            if (PeopleFilterComboBox != null) PeopleFilterComboBox.Visibility = Visibility.Visible;
-            if (PeopleShowAllToggle != null) { /* keep previous state; do not modify */ }
-             // hide search box if visible
-             if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-             // hide the meetings container when in people mode
-             if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
-             // hide today search when not in today mode
-             if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
-             // clear today filter when leaving today mode
-             ClearTodaySearchFilter();
-             // populate people combobox according to toggle (default: only active people)
-             PopulatePeopleComboBox();
-             // show tasks
-             try { ApplyPeopleFilter(null); } catch { ApplyFilter(); }
-             UpdateTitle();
-         }
-
-         private void MeetingButton_Click(object sender, RoutedEventArgs e)
-         {
-             _mode = ViewMode.Meetings;
-             this.Tag = "Meetings";
-             // hide date controls and show meetings combobox
-             DateControlsGrid.Visibility = Visibility.Collapsed;
-             if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Visible;
-             // ensure inner controls are visible
-             if (MeetingsFilterComboBox != null) MeetingsFilterComboBox.Visibility = Visibility.Visible;
-             if (MeetingsShowAllToggle != null) { /* keep previous state; do not modify */ }
-             // hide search box if visible
-             if (SearchTextBox != null) SearchTextBox.Visibility = Visibility.Collapsed;
-             if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Collapsed;
-             // hide the people container when in meetings mode
-             if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
-             // hide today search when not in today mode
-             if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
-             // clear today filter when leaving today mode
-             ClearTodaySearchFilter();
-             // populate meetings combobox according to toggle (default: only active meetings)
-             PopulateMeetingsComboBox();
-             try { ApplyMeetingsFilter(null); } catch { ApplyFilter(); }
-             UpdateTitle();
-         }
-
+            PeopleFilterContainer.Visibility = Visibility.Visible; PeopleFilterComboBox.Visibility = Visibility.Visible;
+            SearchTextBox.Visibility = Visibility.Collapsed; SearchBoxBorder.Visibility = Visibility.Collapsed;
+            MeetingsFilterContainer.Visibility = Visibility.Collapsed; TodaySearchContainer.Visibility = Visibility.Collapsed;
+            ClearTodaySearchFilter();
+            PopulatePeopleComboBox();
+            try { ApplyPeopleFilter(null); } catch { ApplyFilter(); }
+            UpdateTitle();
+        }
+        private void MeetingButton_Click(object sender, RoutedEventArgs e)
+        {
+            _mode = ViewMode.Meetings; this.Tag = "Meetings";
+            DateControlsGrid.Visibility = Visibility.Collapsed;
+            MeetingsFilterContainer.Visibility = Visibility.Visible; MeetingsFilterComboBox.Visibility = Visibility.Visible;
+            SearchTextBox.Visibility = Visibility.Collapsed; SearchBoxBorder.Visibility = Visibility.Collapsed;
+            PeopleFilterContainer.Visibility = Visibility.Collapsed; TodaySearchContainer.Visibility = Visibility.Collapsed;
+            ClearTodaySearchFilter();
+            PopulateMeetingsComboBox();
+            try { ApplyMeetingsFilter(null); } catch { ApplyFilter(); }
+            UpdateTitle();
+        }
         private void AllButton_Click(object sender, RoutedEventArgs e)
         {
-            _mode = ViewMode.All;
-            this.Tag = "All";
-            FilterPopup.IsOpen = false;
-            CalendarPopup.IsOpen = false;
-
-            // Show search box and hide date/filters
+            _mode = ViewMode.All; this.Tag = "All"; FilterPopup.IsOpen = false; CalendarPopup.IsOpen = false;
             DateControlsGrid.Visibility = Visibility.Collapsed;
-            if (PeopleFilterContainer != null) PeopleFilterContainer.Visibility = Visibility.Collapsed;
-            if (MeetingsFilterContainer != null) MeetingsFilterContainer.Visibility = Visibility.Collapsed;
-            if (SearchBoxBorder != null) SearchBoxBorder.Visibility = Visibility.Visible;
-            if (SearchTextBox != null)
-            {
-                SearchTextBox.Visibility = Visibility.Visible;
-                SearchTextBox.Text = string.Empty;
-                SearchTextBox.Focus();
-            }
-            // hide Today search when in All mode and clear it
-            if (TodaySearchContainer != null) TodaySearchContainer.Visibility = Visibility.Collapsed;
-            ClearTodaySearchFilter();
-
-            // Load all tasks
+            PeopleFilterContainer.Visibility = Visibility.Collapsed; MeetingsFilterContainer.Visibility = Visibility.Collapsed;
+            SearchBoxBorder.Visibility = Visibility.Visible; SearchTextBox.Visibility = Visibility.Visible; SearchTextBox.Text = string.Empty; SearchTextBox.Focus();
+            TodaySearchContainer.Visibility = Visibility.Collapsed; ClearTodaySearchFilter();
             try { ApplyAllFilter(SearchTextBox?.Text); } catch { ApplyFilter(); }
             UpdateTitle();
         }
 
-        // Helper to find child of type T in visual tree
         private static T FindVisualChild<T>(DependencyObject obj) where T : DependencyObject
         {
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(obj); i++)
             {
                 DependencyObject child = VisualTreeHelper.GetChild(obj, i);
-                if (child != null && child is T t)
-                    return t;
-                else
-                {
-                    T childOfChild = FindVisualChild<T>(child);
-                    if (childOfChild != null)
-                        return childOfChild;
-                }
+                if (child is T t) return t;
+                var childOfChild = FindVisualChild<T>(child);
+                if (childOfChild != null) return childOfChild;
             }
             return null;
         }
 
         private void SaveCurrentDateTasks()
         {
-            if (_currentDate == null) return;
             var key = DateKey(_currentDate);
             var realTasks = TaskList.Where(t => !t.IsPlaceholder)
                 .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
-                {
-                    PreferredTodayIndex = t.PreferredTodayIndex
-                })
+                { PreferredTodayIndex = t.PreferredTodayIndex })
                 .ToList();
 
-            if (realTasks.Count > 0)
-            {
-                AllTasks[key] = realTasks;
-            }
-            else
-            {
-                if (AllTasks.ContainsKey(key))
-                    AllTasks.Remove(key);
-            }
+            if (realTasks.Count > 0) AllTasks[key] = realTasks; else if (AllTasks.ContainsKey(key)) AllTasks.Remove(key);
         }
 
         private void TaskOptionsButton_Click(object sender, RoutedEventArgs e)
@@ -1191,12 +836,10 @@ namespace Todo
                                 list[i].Description = task.Description;
                                 list[i].People = new List<string>(task.People ?? new List<string>());
                                 list[i].Meetings = new List<string>(task.Meetings ?? new List<string>());
-                                // ensure link path is persisted
                                 list[i].LinkPath = task.LinkPath;
                                 list[i].IsFuture = task.IsFuture;
                                 list[i].FutureDate = task.FutureDate;
                                 list[i].IsComplete = task.IsComplete;
-                                // preserve preferred index meta if present on UI model
                                 list[i].PreferredTodayIndex = task.PreferredTodayIndex;
                                 updatedInPlace = true;
                                 // If the UI model has SetDate/ShowDate, leave them to be derived when reloading
@@ -1210,8 +853,7 @@ namespace Todo
                         if (k == targetKey) continue; // keep target bucket
                         var countBefore = AllTasks[k].Count;
                         AllTasks[k].RemoveAll(t => t.Id == originalId);
-                        if (AllTasks[k].Count == 0)
-                            AllTasks.Remove(k);
+                        if (AllTasks[k].Count == 0) AllTasks.Remove(k);
                     }
 
                     // 3) If we didn't update in place, add to the target bucket (preserve existing relative ordering not possible here)
@@ -1229,16 +871,10 @@ namespace Todo
                         if (originKey != targetKey)
                         {
                             TaskList.Remove(task);
-                            if (_mode == ViewMode.Today)
-                                EnsureHasPlaceholder();
-                        }
-                    }
-                    else
-                    {
-                        // If updated in place and we are viewing that date, update the UI model so it reflects any changes
-                        if (_mode == ViewMode.Today && _currentDate == DateTime.ParseExact(targetKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
-                        {
-                            // UI model 'task' already has the updated values from dialog above.
+                            if (_mode == ViewMode.Today && _currentDate == DateTime.ParseExact(targetKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
+                            {
+                                // UI model 'task' already has the updated values from dialog above.
+                            }
                         }
                     }
 
@@ -1410,8 +1046,8 @@ namespace Todo
 
             if (!string.IsNullOrEmpty(term))
             {
-                term = term.ToLowerInvariant();
-                entries = entries.Where(e => (!string.IsNullOrEmpty(e.Task.TaskName) && e.Task.TaskName.ToLowerInvariant().Contains(term)) || (!string.IsNullOrEmpty(e.Task.Description) && e.Task.Description.ToLowerInvariant().Contains(term))).ToList();
+                var lower = term.ToLowerInvariant();
+                entries = entries.Where(e => (!string.IsNullOrEmpty(e.Task.TaskName) && e.Task.TaskName.ToLowerInvariant().Contains(lower)) || (!string.IsNullOrEmpty(e.Task.Description) && e.Task.Description.ToLowerInvariant().Contains(lower))).ToList();
             }
 
             // Deduplicate by Id, keeping the first occurrence
@@ -1455,10 +1091,8 @@ namespace Todo
             {
                 foreach (var t in AllTasks[RepositoryKey])
                 {
-                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id);
-                    model.InRepository = true;
-                    // carry forward preferred index metadata when showing in repo
-                    model.PreferredTodayIndex = t.PreferredTodayIndex;
+                    var model = new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
+                    { InRepository = true, PreferredTodayIndex = t.PreferredTodayIndex };
                     TaskList.Add(model);
                 }
             }
@@ -1476,22 +1110,11 @@ namespace Todo
                         var path = tm.LinkPath;
                         if (Directory.Exists(path))
                         {
-                            // open folder
-                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = path,
-                                UseShellExecute = true,
-                                Verb = "open"
-                            });
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true, Verb = "open" });
                         }
                         else if (File.Exists(path))
                         {
-                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = path,
-                                UseShellExecute = true,
-                                Verb = "open"
-                            });
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true, Verb = "open" });
                         }
                     }
                 }
@@ -1505,31 +1128,13 @@ namespace Todo
             {
                 if (sender is Button btn && btn.DataContext is TaskModel tm)
                 {
-                    var path = tm?.LinkPath;
-                    if (string.IsNullOrWhiteSpace(path)) return;
-
-                    try
-                    {
-                        // For folders and files, UseShellExecute=true will open with default handler
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = path,
-                            UseShellExecute = true
-                        });
-                    }
+                    var path = tm?.LinkPath; if (string.IsNullOrWhiteSpace(path)) return;
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true }); }
                     catch
                     {
-                        // If Process.Start fails for some reason, try URL handling
                         try
                         {
-                            if (Uri.TryCreate(path, UriKind.Absolute, out var u))
-                            {
-                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                                {
-                                    FileName = u.ToString(),
-                                    UseShellExecute = true
-                                });
-                            }
+                            if (Uri.TryCreate(path, UriKind.Absolute, out var u)) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = u.ToString(), UseShellExecute = true });
                         }
                         catch { }
                     }
@@ -1544,198 +1149,117 @@ namespace Todo
             {
                 var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
                 var backupName = $"{timestamp}_tasks_backup.json";
-                // Ensure data directory exists
-                try { System.IO.Directory.CreateDirectory(DataDirectory); } catch { }
-                var backupPath = System.IO.Path.Combine(DataDirectory, backupName);
+                try { Directory.CreateDirectory(DataDirectory); } catch { }
+                var backupPath = Path.Combine(DataDirectory, backupName);
 
-                if (File.Exists(SaveFileName))
-                {
-                    File.Copy(SaveFileName, backupPath, overwrite: true);
-                }
+                if (File.Exists(SaveFileName)) File.Copy(SaveFileName, backupPath, overwrite: true);
                 else
                 {
-                    // serialize current in-memory tasks to the backup file
                     var sanitized = new Dictionary<string, List<TaskModel>>();
-                    foreach (var kv in AllTasks)
-                         sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
+                    foreach (var kv in AllTasks) sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
                     var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
                     File.WriteAllText(backupPath, json);
                 }
                 MessageBox.Show($"Backup saved: {backupPath}", "Backup", MessageBoxButton.OK, MessageBoxImage.Information);
                 UpdateLastBackupText(DateTime.Now);
-
-                // update totals as well
                 UpdateTotals();
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Backup failed: {ex.Message}", "Backup", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            catch (Exception ex) { MessageBox.Show($"Backup failed: {ex.Message}", "Backup", MessageBoxButton.OK, MessageBoxImage.Error); }
         }
 
-        // Creates an automatic backup in the 'autobackups' folder and trims to the most recent AutoBackupKeep files.
         private void AutoBackupNow()
         {
             try
             {
                 var folder = AutoBackupFolder;
                 try { Directory.CreateDirectory(folder); } catch { }
-
                 var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
                 var backupName = $"{timestamp}_tasks_backup.json";
-                var backupPath = System.IO.Path.Combine(folder, backupName);
+                var backupPath = Path.Combine(folder, backupName);
 
-                if (File.Exists(SaveFileName))
-                {
-                    File.Copy(SaveFileName, backupPath, overwrite: true);
-                }
+                if (File.Exists(SaveFileName)) File.Copy(SaveFileName, backupPath, overwrite: true);
                 else
                 {
                     var sanitized = new Dictionary<string, List<TaskModel>>();
-                    foreach (var kv in AllTasks)
-                         sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
+                    foreach (var kv in AllTasks) sanitized[kv.Key] = kv.Value.Where(t => t != null && !t.IsPlaceholder).ToList();
                     var json = JsonSerializer.Serialize(sanitized, new JsonSerializerOptions { WriteIndented = true });
                     File.WriteAllText(backupPath, json);
                 }
 
-                // Update UI with last backup time
                 try { UpdateLastBackupText(DateTime.Now); } catch { }
 
-                // Trim old backups leaving the most recent AutoBackupKeep files
                 try
                 {
-                    var files = Directory.GetFiles(folder, "*_tasks_backup.json")
-                        .OrderByDescending(f => System.IO.Path.GetFileName(f))
-                        .ToList();
-                    foreach (var f in files.Skip(AutoBackupKeep))
-                    {
-                        try { File.Delete(f); } catch { }
-                    }
+                    var files = Directory.GetFiles(folder, "*_tasks_backup.json").OrderByDescending(f => Path.GetFileName(f)).ToList();
+                    foreach (var f in files.Skip(AutoBackupKeep)) { try { File.Delete(f); } catch { } }
                 }
-                catch (Exception ex)
-                {
-                    // Log trimming errors but don't interrupt auto-backup
-                    try { File.AppendAllText(DebugLogFile, $"[{DateTime.Now}] AutoBackup trim error: {ex.Message}\n"); } catch { }
-                }
+                catch (Exception ex) { try { File.AppendAllText(DebugLogFile, $"[{DateTime.Now}] AutoBackup trim error: {ex.Message}\n"); } catch { } }
             }
-            catch (Exception ex)
-            {
-                // Log errors silently for automatic backups
-                try { File.AppendAllText(DebugLogFile, $"[{DateTime.Now}] AutoBackup error: {ex.Message}\n"); } catch { }
-            }
+            catch (Exception ex) { try { File.AppendAllText(DebugLogFile, $"[{DateTime.Now}] AutoBackup error: {ex.Message}\n"); } catch { } }
         }
 
-        // Find the latest backup timestamp from autobackups folder or root backups
         private DateTime? FindLatestBackupTimestamp()
         {
             try
             {
                 var candidates = new List<DateTime>();
-
-                // check autobackups
                 if (Directory.Exists(AutoBackupFolder))
                 {
                     foreach (var f in Directory.GetFiles(AutoBackupFolder, "*_tasks_backup.json"))
                     {
-                        var name = System.IO.Path.GetFileNameWithoutExtension(f);
-                        var parts = name.Split(new[] {"_tasks_backup"}, StringSplitOptions.None);
-                        if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
-                            candidates.Add(dt);
+                        var name = Path.GetFileNameWithoutExtension(f);
+                        var parts = name.Split(new[] { "_tasks_backup" }, StringSplitOptions.None);
+                        if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt)) candidates.Add(dt);
                     }
                 }
-
-                // check root backups in data directory
                 if (Directory.Exists(DataDirectory))
                 {
                     foreach (var f in Directory.GetFiles(DataDirectory, "*_tasks_backup.json"))
                     {
-                        var name = System.IO.Path.GetFileNameWithoutExtension(f);
-                        var parts = name.Split(new[] {"_tasks_backup"}, StringSplitOptions.None);
-                        if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
-                            candidates.Add(dt);
+                        var name = Path.GetFileNameWithoutExtension(f);
+                        var parts = name.Split(new[] { "_tasks_backup" }, StringSplitOptions.None);
+                        if (parts.Length > 0 && DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt)) candidates.Add(dt);
                     }
                 }
-
-                if (candidates.Count == 0) return null;
-                return candidates.Max();
+                if (candidates.Count == 0) return null; return candidates.Max();
             }
             catch { return null; }
         }
 
         private void UpdateLastBackupText(DateTime? dt)
         {
-            try
-            {
-                var tb = this.FindName("LastBackupDataTextBlock") as TextBlock;
-                if (tb == null) return;
-                tb.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
-            }
-            catch { }
+            try { (FindName("LastBackupDataTextBlock") as TextBlock)!.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--"; } catch { }
         }
-
-        // New: update last saved label
         private void UpdateLastSavedText(DateTime? dt)
         {
-            try
-            {
-                var tb = this.FindName("LastSavedDataTextBlock") as TextBlock;
-                if (tb == null) return;
-                tb.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
-            }
-            catch { }
+            try { (FindName("LastSavedDataTextBlock") as TextBlock)!.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--"; } catch { }
         }
-
-        // New: update previous open label
         private void UpdateLastOpenedText(DateTime? dt)
         {
-            try
-            {
-                var tb = this.FindName("LastOpenedDataTextBlock") as TextBlock;
-                if (tb == null) return;
-                tb.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--";
-            }
-            catch { }
+            try { (FindName("LastOpenedDataTextBlock") as TextBlock)!.Text = dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "--"; } catch { }
         }
-
-        // New: update totals labels
         private void UpdateTotals()
         {
             try
             {
-                var totalTb = this.FindName("TotalTasksDataTextBlock") as TextBlock;
-                var viewTb = this.FindName("CurrentViewCountDataTextBlock") as TextBlock;
+                var totalTb = FindName("TotalTasksDataTextBlock") as TextBlock;
+                var viewTb = FindName("CurrentViewCountDataTextBlock") as TextBlock;
                 if (totalTb == null || viewTb == null) return;
-                int total = 0;
-                try { total = AllTasks.Values.SelectMany(list => list).Count(t => t != null && !t.IsPlaceholder); } catch { total = 0; }
-                int current = 0;
-                try
-                {
-                    // Count visible items in the ListView so filters are respected
-                    if (lbTasksList != null)
-                        current = lbTasksList.Items.OfType<TaskModel>().Count(t => t != null && !t.IsPlaceholder);
-                    else
-                        current = TaskList.Count(t => t != null && !t.IsPlaceholder);
-                }
-                catch { current = 0; }
-                totalTb.Text = total.ToString();
-                viewTb.Text = current.ToString();
+                int total = 0; try { total = AllTasks.Values.SelectMany(list => list).Count(t => t != null && !t.IsPlaceholder); } catch { total = 0; }
+                int current = 0; try { current = lbTasksList?.Items.OfType<TaskModel>().Count(t => t != null && !t.IsPlaceholder) ?? TaskList.Count(t => t != null && !t.IsPlaceholder); } catch { current = 0; }
+                totalTb.Text = total.ToString(); viewTb.Text = current.ToString();
             }
             catch { }
         }
 
-        // Helper to determine whether a task is completed and belongs to yesterday or an earlier date
         private bool IsOldCompleted(TaskModel t, string dateKey)
         {
-            if (t == null) return false;
-            if (!t.IsComplete) return false;
-            if (string.IsNullOrEmpty(dateKey)) return false;
-            if (!DateTime.TryParseExact(dateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
-                return false;
+            if (t == null || !t.IsComplete || string.IsNullOrEmpty(dateKey)) return false;
+            if (!DateTime.TryParseExact(dateKey, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt)) return false;
             // Completed on or before yesterday should be hidden in People/Meetings modes
             return dt.Date <= DateTime.Today.AddDays(-1);
         }
 
-        // Helper to populate People combobox according to toggle state
         private void PopulatePeopleComboBox()
         {
             try
@@ -1768,7 +1292,6 @@ namespace Todo
             catch { }
         }
 
-        // Helper to populate Meetings combobox according to toggle state
         private void PopulateMeetingsComboBox()
         {
             try
@@ -1800,35 +1323,165 @@ namespace Todo
             catch { }
         }
 
-        // Toggle handlers for People
-        private void PeopleShowAllToggle_Checked(object sender, RoutedEventArgs e)
+        private void PeopleShowAllToggle_Checked(object sender, RoutedEventArgs e) { PopulatePeopleComboBox(); if (PeopleFilterComboBox != null) ApplyPeopleFilter(PeopleFilterComboBox.SelectedItem as string); }
+        private void PeopleShowAllToggle_Unchecked(object sender, RoutedEventArgs e) { PopulatePeopleComboBox(); if (PeopleFilterComboBox != null) ApplyPeopleFilter(PeopleFilterComboBox.SelectedItem as string); }
+        private void MeetingsShowAllToggle_Checked(object sender, RoutedEventArgs e) { PopulateMeetingsComboBox(); if (MeetingsFilterComboBox != null) ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string); }
+        private void MeetingsShowAllToggle_Unchecked(object sender, RoutedEventArgs e) { PopulateMeetingsComboBox(); if (MeetingsFilterComboBox != null) ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string); }
+
+        // Today search
+        private void TodaySearchTextBox_TextChanged(object sender, TextChangedEventArgs e) { ApplyTodaySearchFilter(); UpdateTotals(); }
+        private void TodayClearButton_Click(object sender, RoutedEventArgs e)
         {
-            PopulatePeopleComboBox();
-            // Re-apply current selection (blank = all)
-            if (PeopleFilterComboBox != null)
-                ApplyPeopleFilter(PeopleFilterComboBox.SelectedItem as string);
+            try { if (TodaySearchTextBox != null) { TodaySearchTextBox.Text = string.Empty; TodaySearchTextBox.Focus(); } } catch { }
+        }
+        private void ApplyTodaySearchFilter()
+        {
+            try
+            {
+                var view = CollectionViewSource.GetDefaultView(lbTasksList?.ItemsSource); if (view == null) return;
+                if (_mode != ViewMode.Today)
+                {
+                    if (view.Filter != null) { view.Filter = null; view.Refresh(); }
+                    return;
+                }
+                var term = TodaySearchTextBox != null ? (TodaySearchTextBox.Text ?? string.Empty).Trim() : string.Empty;
+                if (string.IsNullOrEmpty(term)) { if (view.Filter != null) { view.Filter = null; view.Refresh(); } return; }
+                var lower = term.ToLowerInvariant();
+                Predicate<object> pred = o =>
+                {
+                    if (o is TaskModel t)
+                    {
+                        if (t.IsPlaceholder) return true;
+                        if (!string.IsNullOrEmpty(t.TaskName) && t.TaskName.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                        if (!string.IsNullOrEmpty(t.Description) && t.Description.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                        if (t.People != null && t.People.Any(p => !string.IsNullOrEmpty(p) && p.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
+                        if (t.Meetings != null && t.Meetings.Any(m => !string.IsNullOrEmpty(m) && m.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
+                        return false;
+                    }
+                    return true;
+                };
+                view.Filter = o => pred(o); view.Refresh();
+            }
+            catch { }
+        }
+        private void ClearTodaySearchFilter()
+        {
+            try
+            {
+                if (TodaySearchTextBox != null) TodaySearchTextBox.Text = string.Empty;
+                var view = CollectionViewSource.GetDefaultView(lbTasksList?.ItemsSource); if (view != null) { view.Filter = null; view.Refresh(); }
+            }
+            catch { }
+        }
+        private void AllSearchClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            try { if (SearchTextBox != null) { SearchTextBox.Text = string.Empty; SearchTextBox.Focus(); } } catch { }
         }
 
-        private void PeopleShowAllToggle_Unchecked(object sender, RoutedEventArgs e)
+        // Task list interactions
+        private void TaskTextBox_GotFocus(object sender, RoutedEventArgs e)
         {
-            PopulatePeopleComboBox();
-            if (PeopleFilterComboBox != null)
-                ApplyPeopleFilter(PeopleFilterComboBox.SelectedItem as string);
+            if (_currentDate != DateTime.Today && sender is TextBox tb) { tb.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next)); return; }
+            if (sender is TextBox tb2 && tb2.DataContext is TaskModel tm && tm.IsPlaceholder) _placeholderJustFocused = true;
         }
-
-        // Toggle handlers for Meetings
-        private void MeetingsShowAllToggle_Checked(object sender, RoutedEventArgs e)
+        private void TaskTextBlock_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            PopulateMeetingsComboBox();
-            if (MeetingsFilterComboBox != null)
-                ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string);
+            try
+            {
+                if (sender is TextBlock tb && tb.DataContext is TaskModel tm)
+                {
+                    var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(tm) as ListViewItem;
+                    if (listViewItem != null)
+                    {
+                        var textBox = FindVisualChild<TextBox>(listViewItem);
+                        if (textBox != null) { textBox.Focus(); textBox.CaretIndex = textBox.Text?.Length ?? 0; }
+                    }
+                }
+            }
+            catch { }
         }
-
-        private void MeetingsShowAllToggle_Unchecked(object sender, RoutedEventArgs e)
+        private void TaskTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
         {
-            PopulateMeetingsComboBox();
-            if (MeetingsFilterComboBox != null)
-                ApplyMeetingsFilter(MeetingsFilterComboBox.SelectedItem as string);
+            if (_currentDate != DateTime.Today) { e.Handled = true; return; }
+            if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder)
+            {
+                _suppressTextChanged = true; tm.IsPlaceholder = false; tm.TaskName = ""; tb.Text = ""; _suppressTextChanged = false;
+            }
+        }
+        private void TaskTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            try
+            {
+                if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder)
+                {
+                    bool isPasteKey = (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V) || (Keyboard.Modifiers == ModifierKeys.Shift && e.Key == Key.Insert);
+                    if (isPasteKey)
+                    {
+                        _suppressTextChanged = true; tm.IsPlaceholder = false; tm.TaskName = string.Empty; tb.Text = string.Empty; _suppressTextChanged = false;
+                    }
+                }
+            }
+            catch { }
+        }
+        private void TaskTextBox_Loaded(object sender, RoutedEventArgs e)
+        {
+            try { if (sender is TextBox tb) DataObject.AddPastingHandler(tb, new DataObjectPastingEventHandler(TaskTextBox_OnPasting)); } catch { }
+        }
+        private void TaskTextBox_OnPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            try { if (sender is TextBox tb && tb.DataContext is TaskModel tm && tm.IsPlaceholder) { _suppressTextChanged = true; tm.IsPlaceholder = false; tm.TaskName = string.Empty; tb.Text = string.Empty; _suppressTextChanged = false; } } catch { }
+        }
+        private void TaskTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_suppressTextChanged) return;
+            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
+            {
+                if (_currentDate != DateTime.Today) { tb.Text = tm.TaskName; return; }
+                if (!tm.IsPlaceholder && TaskList.Last() == tm && !string.IsNullOrWhiteSpace(tb.Text)) { _suppressTextChanged = true; tm.TaskName = tb.Text; EnsureHasPlaceholder(); _suppressTextChanged = false; }
+                else if (!tm.IsPlaceholder && string.IsNullOrWhiteSpace(tb.Text) && TaskList.IndexOf(tm) != TaskList.Count - 1) { TaskList.Remove(tm); }
+
+                if (_mode == ViewMode.Today)
+                {
+                    var key = DateKey(_currentDate);
+                    AllTasks[key] = TaskList.Where(t => !t.IsPlaceholder)
+                        .Select(t => new TaskModel(t.TaskName, t.IsComplete, false, t.Description, new List<string>(t.People), new List<string>(t.Meetings), t.IsFuture, t.FutureDate, t.LinkPath, t.Id)
+                        { PreferredTodayIndex = t.PreferredTodayIndex })
+                        .ToList();
+                }
+            }
+            _placeholderJustFocused = false;
+            UpdateTitle();
+            UpdateTotals();
+        }
+        private void TaskTextBox_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (_currentDate != DateTime.Today) { e.Handled = true; return; }
+            if (e.Key == Key.Enter && sender is TextBox tb && tb.DataContext is TaskModel tm)
+            {
+                if (TaskList.Last() == tm && !tm.IsPlaceholder && !string.IsNullOrWhiteSpace(tb.Text)) EnsureHasPlaceholder();
+                var idx = TaskList.IndexOf(tm); if (idx >= 0)
+                {
+                    var nextIdx = Math.Min(idx + 1, TaskList.Count - 1); var next = TaskList[nextIdx];
+                    var listViewItem = lbTasksList.ItemContainerGenerator.ContainerFromItem(next) as ListViewItem;
+                    if (listViewItem != null)
+                    {
+                        var nextTextBox = FindVisualChild<TextBox>(listViewItem);
+                        if (nextTextBox != null) { nextTextBox.Focus(); nextTextBox.CaretIndex = nextTextBox.Text?.Length ?? 0; }
+                        else Keyboard.Focus(listViewItem);
+                    }
+                }
+                e.Handled = true;
+            }
+        }
+        private void TaskTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (_currentDate != DateTime.Today) return;
+            if (sender is TextBox tb && tb.DataContext is TaskModel tm)
+            {
+                if (string.IsNullOrWhiteSpace(tm.TaskName)) { if (!tm.IsPlaceholder) { tm.TaskName = string.Empty; tm.IsPlaceholder = true; } }
+            }
+            try { if (sender is TextBox tb2) { var sv = FindVisualChild<ScrollViewer>(tb2); if (sv != null) sv.ScrollToHorizontalOffset(0); } } catch { }
+            SaveTasks();
         }
 
         private void TimeTrackingButton_Click(object sender, RoutedEventArgs e)
@@ -1844,125 +1497,40 @@ namespace Todo
             }
         }
 
-        // Expose a minimal accessor for the AllTasks dictionary to other classes (read-only snapshot)
-        public static System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>> GetAllTasks()
-        {
-            // Return a shallow copy to avoid external mutation
-            try
-            {
-                var mw = System.Windows.Application.Current?.MainWindow as MainWindow;
-                if (mw == null) return new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>>();
-                return mw.AllTasks.ToDictionary(kv => kv.Key, kv => kv.Value);
-            }
-            catch { return new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<TaskModel>>(); }
-        }
-
-        // TODAY SEARCH IMPLEMENTATION
-        private void TodaySearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            ApplyTodaySearchFilter();
-            UpdateTotals();
-        }
-
-        private void TodayClearButton_Click(object sender, RoutedEventArgs e)
+        private void ReorderTodayAfterCompletionToggle(TaskModel tm)
         {
             try
             {
-                if (TodaySearchTextBox != null)
-                {
-                    TodaySearchTextBox.Text = string.Empty;
-                    TodaySearchTextBox.Focus();
-                }
+                if (tm == null || tm.IsPlaceholder) return; if (_mode != ViewMode.Today) return; if (_currentDate != DateTime.Today) return;
+                var oldIndex = TaskList.IndexOf(tm); if (oldIndex < 0) return;
+                TaskList.RemoveAt(oldIndex);
+                int placeholderIndex = TaskList.Count > 0 && TaskList.Last().IsPlaceholder ? TaskList.Count - 1 : TaskList.Count;
+                int completedCount = 0; for (int i = 0; i < placeholderIndex; i++) { if (TaskList[i].IsComplete) completedCount++; else break; }
+                int insertIndex = completedCount; insertIndex = Math.Min(Math.Max(0, insertIndex), TaskList.Count);
+                TaskList.Insert(insertIndex, tm);
+                EnsureHasPlaceholder();
             }
             catch { }
         }
-
-        private void ApplyTodaySearchFilter()
+        private void CheckBox_Click(object sender, RoutedEventArgs e)
         {
-            try
+            if (_mode == ViewMode.Today)
             {
-                var view = CollectionViewSource.GetDefaultView(lbTasksList?.ItemsSource);
-                if (view == null)
-                    return;
-
-                // Only active in Today mode; otherwise clear any filter
-                if (_mode != ViewMode.Today)
-                {
-                    if (view.Filter != null)
-                    {
-                        view.Filter = null;
-                        view.Refresh();
-                    }
-                    return;
-                }
-
-                var term = TodaySearchTextBox != null ? (TodaySearchTextBox.Text ?? string.Empty).Trim() : string.Empty;
-                if (string.IsNullOrEmpty(term))
-                {
-                    // Avoid reassigning the filter if it's already cleared
-                    if (view.Filter != null)
-                    {
-                        view.Filter = null;
-                        view.Refresh();
-                    }
-                    return;
-                }
-
-                var lower = term.ToLowerInvariant();
-                Predicate<object> pred = o =>
-                {
-                    if (o is TaskModel t)
-                    {
-                        // Always keep the placeholder visible so a new task can be added while searching
-                        if (t.IsPlaceholder) return true;
-                        if (!string.IsNullOrEmpty(t.TaskName) && t.TaskName.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0) return true;
-                        if (!string.IsNullOrEmpty(t.Description) && t.Description.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0) return true;
-                        if (t.People != null && t.People.Any(p => !string.IsNullOrEmpty(p) && p.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
-                        if (t.Meetings != null && t.Meetings.Any(m => !string.IsNullOrEmpty(m) && m.IndexOf(lower, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
-                        return false;
-                    }
-                    return true;
-                };
-
-                // Only set and refresh if predicate actually changed (prevents unnecessary refresh while typing in the list)
-                view.Filter = o => pred(o);
-                view.Refresh();
+                if (sender is CheckBox cb && cb.DataContext is TaskModel tm) ReorderTodayAfterCompletionToggle(tm);
+                SaveTasks(); return;
             }
-            catch { }
+            if (sender is CheckBox cb2 && cb2.DataContext is TaskModel tm2)
+            {
+                foreach (var k in AllTasks.Keys.ToList())
+                {
+                    var list = AllTasks[k];
+                    foreach (var stored in list.Where(x => x.Id == tm2.Id)) stored.IsComplete = tm2.IsComplete;
+                }
+                SaveTasks();
+            }
         }
 
-        private void ClearTodaySearchFilter()
-        {
-            try
-            {
-                if (TodaySearchTextBox != null)
-                {
-                    TodaySearchTextBox.Text = string.Empty;
-                }
-                var view = CollectionViewSource.GetDefaultView(lbTasksList?.ItemsSource);
-                if (view != null)
-                {
-                    view.Filter = null;
-                    view.Refresh();
-                }
-            }
-            catch { }
-        }
-
-        private void AllSearchClearButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (SearchTextBox != null)
-                {
-                    SearchTextBox.Text = string.Empty;
-                    SearchTextBox.Focus();
-                }
-            }
-            catch { }
-        }
-
-        // Send to repository from Today page
+        // Repo actions
         private void SendToRepositoryButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -1971,36 +1539,18 @@ namespace Todo
                 {
                     var todayKey = DateKey(_currentDate);
                     if (!AllTasks.ContainsKey(RepositoryKey)) AllTasks[RepositoryKey] = new List<TaskModel>();
-
-                    // Determine the task's index in today's list (excluding placeholder)
                     int indexInToday = TaskList.Where(t => !t.IsPlaceholder).ToList().FindIndex(t => t.Id == tm.Id);
-
-                    // Remove from today's storage
-                    if (AllTasks.ContainsKey(todayKey))
-                    {
-                        AllTasks[todayKey].RemoveAll(t => t.Id == tm.Id);
-                        if (AllTasks[todayKey].Count == 0) AllTasks.Remove(todayKey);
-                    }
-
-                    // Add to repository storage (preserve Id) and carry preferred index
+                    if (AllTasks.ContainsKey(todayKey)) { AllTasks[todayKey].RemoveAll(t => t.Id == tm.Id); if (AllTasks[todayKey].Count == 0) AllTasks.Remove(todayKey); }
                     var copy = new TaskModel(tm.TaskName, tm.IsComplete, false, tm.Description, new List<string>(tm.People), new List<string>(tm.Meetings), tm.IsFuture, tm.FutureDate, tm.LinkPath, tm.Id)
-                    {
-                        InRepository = true,
-                        PreferredTodayIndex = indexInToday >= 0 ? (int?)indexInToday : null
-                    };
+                    { InRepository = true, PreferredTodayIndex = indexInToday >= 0 ? (int?)indexInToday : null };
                     AllTasks[RepositoryKey].Add(copy);
-
-                    // Update UI (remove from list, keep placeholder)
                     TaskList.Remove(tm);
                     EnsureHasPlaceholder();
-
                     SaveTasks();
                 }
             }
             catch { }
         }
-
-        // Move from repository back to today
         private void MoveToTodayButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -2008,47 +1558,35 @@ namespace Todo
                 if (sender is Button btn && btn.DataContext is TaskModel tm && !tm.IsPlaceholder)
                 {
                     if (!AllTasks.ContainsKey(RepositoryKey)) return;
-
-                    // Find stored repo entry for this item to read its PreferredTodayIndex
                     TaskModel repoStored = AllTasks[RepositoryKey].FirstOrDefault(t => t.Id == tm.Id);
                     int? preferredIndex = repoStored?.PreferredTodayIndex;
-
-                    // Remove from repository
-                    AllTasks[RepositoryKey].RemoveAll(t => t.Id == tm.Id);
-                    if (AllTasks[RepositoryKey].Count == 0) AllTasks.Remove(RepositoryKey);
-
-                    // Add to today's key at the preferred index if available
-                    var todayKey = DateKey(DateTime.Today);
-                    if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
+                    AllTasks[RepositoryKey].RemoveAll(t => t.Id == tm.Id); if (AllTasks[RepositoryKey].Count == 0) AllTasks.Remove(RepositoryKey);
+                    var todayKey = DateKey(DateTime.Today); if (!AllTasks.ContainsKey(todayKey)) AllTasks[todayKey] = new List<TaskModel>();
                     var copy = new TaskModel(tm.TaskName, tm.IsComplete, false, tm.Description, new List<string>(tm.People), new List<string>(tm.Meetings), false, null, tm.LinkPath, tm.Id)
-                    {
-                        InRepository = false,
-                        PreferredTodayIndex = preferredIndex
-                    };
-
+                    { InRepository = false, PreferredTodayIndex = preferredIndex };
                     var todayList = AllTasks[todayKey];
-                    if (preferredIndex.HasValue && preferredIndex.Value >= 0 && preferredIndex.Value <= todayList.Count)
-                    {
-                        todayList.Insert(preferredIndex.Value, copy);
-                    }
-                    else
-                    {
-                        todayList.Add(copy);
-                    }
-
-                    // Update UI
-                    TaskList.Remove(tm);
-
-                    // If we're showing Today, reload to reflect new ordering
-                    if (_mode == ViewMode.Today && _currentDate == DateTime.Today)
-                    {
-                        LoadTasksForDate(DateTime.Today);
-                    }
-
-                    SaveTasks();
+                    if (preferredIndex.HasValue && preferredIndex.Value >= 0 && preferredIndex.Value <= todayList.Count) todayList.Insert(preferredIndex.Value, copy); else todayList.Add(copy);
+                    TaskList.Remove(tm); if (_mode == ViewMode.Today && _currentDate == DateTime.Today) LoadTasksForDate(DateTime.Today); SaveTasks();
                 }
             }
             catch { }
+        }
+
+        // Expose a minimal accessor for the AllTasks dictionary to other classes (read-only snapshot)
+        public static Dictionary<string, List<TaskModel>> GetAllTasks()
+        {
+            // Return a shallow copy to avoid external mutation
+            try
+            {
+                var mw = Application.Current?.MainWindow as MainWindow; if (mw == null) return new Dictionary<string, List<TaskModel>>();
+                return mw.AllTasks.ToDictionary(kv => kv.Key, kv => kv.Value);
+            }
+            catch { return new Dictionary<string, List<TaskModel>>(); }
+        }
+
+        private class MetaInfo
+        {
+            public DateTime? LastOpened { get; set; }
         }
     }
 }

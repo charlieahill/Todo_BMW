@@ -909,6 +909,18 @@
                     </Canvas>
                 </Viewbox>
             </Button>
+            <!-- Dock right (full height) button next to time tracking -->
+            <Button Name="DockRightFullHeightButton" Click="DockRightFullHeightButton_Click" ToolTip="Dock right and full height" Padding="8,4" Margin="8,0,0,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Viewbox Width="16" Height="16" VerticalAlignment="Center">
+                        <Canvas Width="24" Height="24">
+                            <!-- Icon: right alignment with vertical stretch -->
+                            <Rectangle Width="3" Height="16" Canvas.Left="19" Canvas.Top="4" Fill="Black"/>
+                            <Rectangle Width="10" Height="12" Canvas.Left="6" Canvas.Top="6" Stroke="Black" StrokeThickness="1.2" Fill="Transparent"/>
+                        </Canvas>
+                    </Viewbox>
+                </StackPanel>
+            </Button>
         </StackPanel>
     </Grid>
 </Window>
