@@ -1,0 +1,23 @@
+<Window x:Class="Todo.SettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings" Height="200" Width="360" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <GroupBox Header="On completing a task" Padding="8">
+            <StackPanel>
+                <RadioButton x:Name="MoveToTopRadio" Content="Move to top" Margin="0,0,0,6"/>
+                <RadioButton x:Name="DoNotMoveRadio" Content="Do not move item"/>
+            </StackPanel>
+        </GroupBox>
+
+        <StackPanel Orientation="Horizontal" Grid.Row="1" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Width="90" Margin="0,0,8,0" IsDefault="True" Click="Ok_Click">OK</Button>
+            <Button Width="90" IsCancel="True">Cancel</Button>
+        </StackPanel>
+    </Grid>
+</Window>

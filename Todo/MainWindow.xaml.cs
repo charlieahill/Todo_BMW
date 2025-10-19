@@ -1497,11 +1497,39 @@ namespace Todo
             }
         }
 
+        private void SettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new SettingsDialog() { Owner = this };
+                if (dlg.ShowDialog() == true)
+                {
+                    // Apply any settings that can affect current view immediately
+                    // For the completion behavior, no immediate reflow needed until next toggle.
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to open settings: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void ReorderTodayAfterCompletionToggle(TaskModel tm)
         {
             try
             {
                 if (tm == null || tm.IsPlaceholder) return; if (_mode != ViewMode.Today) return; if (_currentDate != DateTime.Today) return;
+
+                // Obey user setting: either move to top or do not change order
+                var behavior = SettingsService.Instance.Settings.MoveBehavior;
+                if (behavior == MoveCompletedBehavior.DoNotMove)
+                {
+                    // Keep current order but still ensure placeholder exists
+                    EnsureHasPlaceholder();
+                    return;
+                }
+
+                // Default MoveToTop behavior
                 var oldIndex = TaskList.IndexOf(tm); if (oldIndex < 0) return;
                 TaskList.RemoveAt(oldIndex);
                 int placeholderIndex = TaskList.Count > 0 && TaskList.Last().IsPlaceholder ? TaskList.Count - 1 : TaskList.Count;
@@ -1512,6 +1540,7 @@ namespace Todo
             }
             catch { }
         }
+
         private void CheckBox_Click(object sender, RoutedEventArgs e)
         {
             if (_mode == ViewMode.Today)

@@ -909,7 +909,18 @@
                     </Canvas>
                 </Viewbox>
             </Button>
-            <!-- Dock right (full height) button next to time tracking -->
+            <!-- Settings button with cog icon, between time tracking and dock right buttons -->
+            <Button Name="SettingsButton" Click="SettingsButton_Click" ToolTip="Settings" Padding="8,4" Margin="8,0,0,0">
+                <Viewbox Width="16" Height="16" VerticalAlignment="Center">
+                    <Canvas Width="24" Height="24">
+                        <!-- Simple cog icon -->
+                        <Ellipse Width="14" Height="14" Canvas.Left="5" Canvas.Top="5" Stroke="Black" StrokeThickness="1.2" Fill="Transparent"/>
+                        <Ellipse Width="4" Height="4" Canvas.Left="10" Canvas.Top="10" Stroke="Black" StrokeThickness="1" Fill="Transparent"/>
+                        <Path Data="M12,2 L12,5 M12,19 L12,22 M2,12 L5,12 M19,12 L22,12 M4.5,4.5 L6.7,6.7 M17.3,17.3 L19.5,19.5 M4.5,19.5 L6.7,17.3 M17.3,6.7 L19.5,4.5" Stroke="Black" StrokeThickness="1.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Canvas>
+                </Viewbox>
+            </Button>
+            <!-- Dock right (full height) button next to settings -->
             <Button Name="DockRightFullHeightButton" Click="DockRightFullHeightButton_Click" ToolTip="Dock right and full height" Padding="8,4" Margin="8,0,0,0">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Viewbox Width="16" Height="16" VerticalAlignment="Center">
